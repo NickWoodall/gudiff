@@ -120,3 +120,4 @@ venv.bak/
 *.pkl
 *.log
 output/*
+data_npose/*
