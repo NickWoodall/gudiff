@@ -30,6 +30,7 @@ from dgl import DGLGraph
 from torch import Tensor
 
 from se3_transformer.model.basis import get_basis, update_basis_with_fused
+from se3_transformer.model.layers.topk0_pool import TopK_Pool
 from se3_transformer.model.layers.attention import AttentionBlockSE3
 from se3_transformer.model.layers.linear import LinearSE3
 from se3_transformer.model.layers.convolution import ConvSE3, ConvSE3FuseLevel
@@ -60,14 +61,16 @@ def get_populated_edge_features(relative_pos: Tensor, edge_features: Optional[Di
     return edge_features
 
 
-class SE3Transformer(nn.Module):
+class SE3Transformer_topK(nn.Module):
     def __init__(self,
                  num_layers: int,
                  fiber_in: Fiber,
                  fiber_hidden: Fiber,
                  fiber_out: Fiber,
+                 fiber_out_topk: Fiber,
                  num_heads: int,
                  channels_div: int,
+                 k: int,
                  fiber_edge: Fiber = Fiber({}),
                  return_type: Optional[int] = None,
                  pooling: Optional[Literal['avg', 'max']] = None,
@@ -125,11 +128,24 @@ class SE3Transformer(nn.Module):
 
         graph_modules.append(LinearSE3(fiber_in=fiber_in,
                                        fiber_out=fiber_out))
+        
+        
         self.graph_modules = Sequential(*graph_modules)
+        #convolute down to type 0 features only 
+        self.topK_conv = ConvSE3(    fiber_in=fiber_out,
+                                 fiber_out=fiber_out_topk,
+                                 fiber_edge=fiber_edge,
+                                 self_interaction=True,
+                                 use_layer_norm=True,
+                                 max_degree= self.max_degree,
+                                 fuse_level= self.fuse_level,
+                                 low_memory=False)
+        
+        self.topK_pool = TopK_Pool(fiber_out_topk, k=k)
 
-        if pooling is not None:
-            assert return_type is not None, 'return_type must be specified when pooling'
-            self.pooling_module = GPooling(pool=pooling, feat_type=return_type)
+#         if pooling is not None:
+#             assert return_type is not None, 'return_type must be specified when pooling'
+#             self.pooling_module = GPooling(pool=pooling, feat_type=return_type)
 
     def forward(self, graph: DGLGraph, node_feats: Dict[str, Tensor],
                 edge_feats: Optional[Dict[str, Tensor]] = None,
@@ -148,14 +164,17 @@ class SE3Transformer(nn.Module):
         edge_feats = get_populated_edge_features(graph.edata['rel_pos'], edge_feats)
 
         node_feats = self.graph_modules(node_feats, edge_feats, graph=graph, basis=basis)
+        
+        topk_feats = self.topK_conv(node_feats, edge_feats, graph=graph, basis=basis)
+        topk_out, topk_indx = self.topK_pool(topk_feats, graph)
 
-        if self.pooling is not None:
-            return self.pooling_module(node_feats, graph=graph)
+#         if self.pooling is not None:
+#             return self.pooling_module(node_feats, graph=graph)
 
-        if self.return_type is not None:
-            return node_feats[str(self.return_type)]
+#         if self.return_type is not None:
+#             return node_feats[str(self.return_type)]
 
-        return node_feats
+        return node_feats, topk_feats, topk_indx
 
     @staticmethod
     def add_argparse_args(parser):
@@ -178,45 +197,3 @@ class SE3Transformer(nn.Module):
 
         return parser
 
-
-class SE3TransformerPooled(nn.Module):
-    def __init__(self,
-                 fiber_in: Fiber,
-                 fiber_out: Fiber,
-                 fiber_edge: Fiber,
-                 num_degrees: int,
-                 num_channels: int,
-                 output_dim: int,
-                 **kwargs):
-        super().__init__()
-        kwargs['pooling'] = kwargs['pooling'] or 'max'
-        self.transformer = SE3Transformer(
-            fiber_in=fiber_in,
-            fiber_hidden=Fiber.create(num_degrees, num_channels),
-            fiber_out=fiber_out,
-            fiber_edge=fiber_edge,
-            return_type=0,
-            **kwargs
-        )
-
-        n_out_features = fiber_out.num_features
-        self.mlp = nn.Sequential(
-            nn.Linear(n_out_features, n_out_features),
-            nn.ReLU(),
-            nn.Linear(n_out_features, output_dim)
-        )
-
-    def forward(self, graph, node_feats, edge_feats, basis=None, compute_gradients=False):
-        feats = self.transformer(graph, node_feats, edge_feats, basis,  compute_gradients=compute_gradients).squeeze(-1)
-        y = self.mlp(feats).squeeze(-1)
-        return y
-
-    @staticmethod
-    def add_argparse_args(parent_parser):
-        parser = parent_parser.add_argument_group("Model architecture")
-        SE3Transformer.add_argparse_args(parser)
-        parser.add_argument('--num_degrees',
-                            help='Number of degrees to use. Hidden features will have types [0, ..., num_degrees - 1]',
-                            type=int, default=4)
-        parser.add_argument('--num_channels', help='Number of channels for the hidden features', type=int, default=32)
-        return parent_parser
