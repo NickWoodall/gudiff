@@ -1837,7 +1837,17 @@ def nposes_from_silent(fname, aa=False):
         return nposes, tags, sequences
 
 
-
+def makePointPDB(coordinates,name,outDirec=""):
+        """Take a vector of x,y,z vectors coords and writes pdb file with those points"""
+        resid=1
+        atomnumb=2
+        with open(f'{outDirec}/{name}', 'w') as f:
+            for i in coordinates:
+                f.write('ATOM{:>7s}  CA  ALA A{:>4s}     {:>7.3f} {:>7.3f} {:>7.3f}  1.00  0.00           C\n'.format(str(atomnumb),str(resid),float(i[0]),float(i[1]),float(i[2])))
+                resid=resid+1
+                atomnumb=atomnumb+10
+            f.write('END')
+        return 1
 
 
 
