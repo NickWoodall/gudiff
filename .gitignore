@@ -119,5 +119,6 @@ venv.bak/
 **/results
 *.pkl
 *.log
+log/*
 output/*
 data_npose/*
