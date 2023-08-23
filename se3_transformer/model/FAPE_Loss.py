@@ -76,7 +76,7 @@ def get_t(N, Ca, C, non_ideal=False, eps=1e-5):
     t = Ts[:,:,None] - Ts[:,:,:,None] # t[0,1] = residue 0 -> residue 1 vector
     return torch.einsum('iblkj, iblmk -> iblmj', Rs, t) # (I,B,L,L,3)
 
-def FAPE_loss(pred, true,  d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, eps=1e-6):
+def FAPE_loss(pred, true, score_scales,  d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, eps=1e-6):
     '''
     Calculate Backbone FAPE loss from RosettaTTAFold
     https://github.com/uw-ipd/RoseTTAFold2/blob/main/network/loss.py
@@ -103,11 +103,15 @@ def FAPE_loss(pred, true,  d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, 
 
     # calculate masked loss (ignore missing regions when calculate loss)
     loss = (loss[:,True]).sum(dim=-1) / (torch.ones_like(loss).sum()+eps) # (I)
+    loss = loss.sum(dim=-1) #sum to batch dimension weight score by t-value (varies per batch)
 
     # weighting loss
-    w_loss = torch.pow(torch.full((I,), gamma, device=pred.device), torch.arange(I, device=pred.device))
-    w_loss = torch.flip(w_loss, (0,))
-    w_loss = w_loss / w_loss.sum()
+#     w_loss = torch.pow(torch.full((I,), gamma, device=pred.device), torch.arange(I, device=pred.device))
+#     w_loss = torch.flip(w_loss, (0,))
+#     w_loss = w_loss / w_loss.sum()
+
+    w_loss = score_scales.to(loss.device)
+    w_loss = w_loss / w_loss.sum() #do i need to normalize score_scales?
 
     tot_loss = (w_loss * loss).sum()
     
