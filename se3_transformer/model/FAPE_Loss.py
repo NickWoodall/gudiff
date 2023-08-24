@@ -103,16 +103,17 @@ def FAPE_loss(pred, true, score_scales,  d_clamp=10.0, d_clamp_inter=30.0, A=10.
 
     # calculate masked loss (ignore missing regions when calculate loss)
     loss = (loss[:,True]).sum(dim=-1) / (torch.ones_like(loss).sum()+eps) # (I)
-    loss = loss.sum(dim=-1) #sum to batch dimension weight score by t-value (varies per batch)
+    #loss = loss.sum(dim=-1) #sum to batch dimension weight score by t-value (varies per batch) #me
 
     # weighting loss
-#     w_loss = torch.pow(torch.full((I,), gamma, device=pred.device), torch.arange(I, device=pred.device))
-#     w_loss = torch.flip(w_loss, (0,))
-#     w_loss = w_loss / w_loss.sum()
+    w_loss = torch.pow(torch.full((I,), gamma, device=pred.device), torch.arange(I, device=pred.device))
+    w_loss = torch.flip(w_loss, (0,))
+    w_loss = w_loss / w_loss.sum()
 
-    w_loss = score_scales.to(loss.device)
-    w_loss = w_loss / w_loss.sum() #do i need to normalize score_scales?
+    #w_loss = score_scales.to(loss.device)#me
+    #w_loss = w_loss / w_loss.sum() #do i need to normalize score_scales?#me
 
     tot_loss = (w_loss * loss).sum()
+#     tot_loss = loss.sum()#me
     
     return tot_loss, loss.detach()

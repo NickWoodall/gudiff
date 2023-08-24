@@ -58,10 +58,12 @@ class FrameDiffNoise(torch.nn.Module):
         out_shape = bb_dict['N_CA'][0][None,...].repeat(len(t_vec),1,1,1).shape
 
         #sample rotation
-        rot_vec = np.array([self.so3d.sample(t) for t in t_vec]).squeeze(1)
+        rot_vec = np.array([self.so3d.sample(t, n_samples=ca.shape[1]) for t in t_vec]).reshape((-1,3))
         rotmat = Rotation.from_rotvec(rot_vec).as_matrix()
         #apply rotation
-        rotmat = rotmat[:,None,...].repeat(ca.shape[1],axis=1).reshape((-1,3,3))
+        #rotmat = rotmat[:,None,...].repeat(ca.shape[1],axis=1).reshape((-1,3,3))
+        
+        
         nc_vec_noised = ru.rot_vec_mul(torch.tensor(rotmat,dtype=cast),nc_vec).reshape(out_shape)
         cc_vec_noised = ru.rot_vec_mul(torch.tensor(rotmat,dtype=cast),cc_vec).reshape(out_shape)
 
@@ -83,15 +85,15 @@ class FrameDiffNoise(torch.nn.Module):
         out_shape = bb_dict['N_CA'].shape
         
         batch_size = ca.shape[0]
-        if t_vec == None:
+        if t_vec is None:
             t_vec =  np.random.uniform(size=batch_size)*t_mult
         score_scales = [self.score_scaling(t) for t in t_vec]
         
         #sample rotation
-        rot_vec = np.array([self.so3d.sample(t) for t in t_vec]).squeeze(1)
+        rot_vec = np.array([self.so3d.sample(t, n_samples=ca.shape[1]) for t in t_vec]).reshape((-1,3))
         rotmat = Rotation.from_rotvec(rot_vec).as_matrix()
         #apply rotation
-        rotmat = rotmat[:,None,...].repeat(ca.shape[1],axis=1).reshape((-1,3,3))
+        #rotmat = rotmat[:,None,...].repeat(ca.shape[1],axis=1).reshape((-1,3,3))
         nc_vec_noised = ru.rot_vec_mul(torch.tensor(rotmat,dtype=cast),nc_vec).reshape(out_shape)
         cc_vec_noised = ru.rot_vec_mul(torch.tensor(rotmat,dtype=cast),cc_vec).reshape(out_shape)
         
