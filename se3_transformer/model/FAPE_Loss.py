@@ -76,7 +76,45 @@ def get_t(N, Ca, C, non_ideal=False, eps=1e-5):
     t = Ts[:,:,None] - Ts[:,:,:,None] # t[0,1] = residue 0 -> residue 1 vector
     return torch.einsum('iblkj, iblmk -> iblmj', Rs, t) # (I,B,L,L,3)
 
-def FAPE_loss(pred, true,  d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, eps=1e-6):
+def FAPE_loss(pred, true, score_scales,  d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, eps=1e-6):
+    '''
+    Calculate Backbone FAPE loss from RosettaTTAFold
+    https://github.com/uw-ipd/RoseTTAFold2/blob/main/network/loss.py
+    Input:
+        - pred: predicted coordinates (I, B, L, n_atom, 3)
+        - true: true coordinates (B, L, n_atom, 3)
+    Output: str loss
+    '''
+    I = pred.shape[0]
+    true = true.unsqueeze(0)
+    t_tilde_ij = get_t(true[:,:,:,0], true[:,:,:,1], true[:,:,:,2])
+    t_ij = get_t(pred[:,:,:,0], pred[:,:,:,1], pred[:,:,:,2])
+
+    difference = torch.sqrt(torch.square(t_tilde_ij-t_ij).sum(dim=-1) + eps)
+    eij_label = difference[-1].clone().detach()
+
+    clamp = torch.zeros_like(difference)
+
+    # intra vs inter#me coded
+    clamp[:,True] = d_clamp
+
+    difference = torch.clamp(difference, max=clamp)
+    loss = difference / A # (I, B, L, L)
+
+    # calculate masked loss (ignore missing regions when calculate loss)
+    loss = (loss[:,True]).sum(dim=-1) / (torch.ones_like(loss).sum()+eps) # (I)
+
+    # weighting loss
+#     w_loss = torch.pow(torch.full((I,), gamma, device=pred.device), torch.arange(I, device=pred.device))
+#     w_loss = torch.flip(w_loss, (0,))
+#     w_loss = w_loss / w_loss.sum()
+    w_loss = score_scales[None,None,:,None]
+
+    tot_loss = (w_loss * loss).sum()
+    
+    return tot_loss, loss.detach()
+
+def FAPE_loss_unscaled(pred, true,  d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, eps=1e-6):
     '''
     Calculate Backbone FAPE loss from RosettaTTAFold
     https://github.com/uw-ipd/RoseTTAFold2/blob/main/network/loss.py

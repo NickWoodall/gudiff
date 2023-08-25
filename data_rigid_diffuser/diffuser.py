@@ -44,7 +44,7 @@ class FrameDiffNoise(torch.nn.Module):
         cc_vec = bb_dict['C_CA'].reshape((-1,3))
         
         if t_vec is None:
-            t_vec =  np.random.uniform(size=batch_size)
+            t_vec =  np.random.uniform(size=ca.shape[0])
         score_scales = [self.score_scaling(t) for t in t_vec]
         
         #sample rotation
