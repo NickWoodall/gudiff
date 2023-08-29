@@ -438,32 +438,30 @@ class SO3Diffuser:
             mask: True indicates which residues to diffuse.
 
         Returns:
-            [..., 3] rotation vector at next step.
+            [..., 2, 3] N_CA, C_CA vector at next step
         """
         if not np.isscalar(t): raise ValueError(f'{t} must be a scalar.')
 
         g_t = self.diffusion_coef(t)
         #z = noise_scale * np.random.normal(size=score_t.shape)
         #random noise step, assumed unbatched
-        rot_vec = self.sample(noise_scale, n_samples= np.cumprod(update_q.shape[:-1])[-1])
+        rot_vec = self.sample(noise_scale, n_samples= np.cumprod(update_q.shape[:-1])[-1]) 
         rotmat = Rotation.from_rotvec(rot_vec).as_matrix()
         Qs = Rs2Qs(torch.tensor(rotmat))
         Qs = normQ(Qs)
         #g_t * np.sqrt(dt) * z
         rand_noise = g_t * np.sqrt(dt)
         rand_noise = normQ(powerQ(Qs, rand_noise))
+        rand_noise = rand_noise.unsqueeze(1).repeat((1,2,1)) #repeat for N_CA, C_CA vec
         #perturb = (g_t ** 2) * score_t * dt + g_t * np.sqrt(dt) * z
-        print(rand_noise.shape)
-        print(update_q.shape)
-        perturb = multQ(powerQ(update_q.reshape((-1,4)), (g_t**2)*dt),rand_noise)
+        update_q = update_q.unsqueeze(2).repeat((1,1,2,1))
+        perturb = multQ(powerQ(update_q.reshape((-1,4)), (g_t**2)*dt),rand_noise.reshape((-1,4)))
         
         
         Rs = Qs2Rs(perturb).reshape((-1,2,3,3))
         N_C_to_Rot = torch.cat((noised_dict['N_CA'],
                                 noised_dict['C_CA']),dim=2).reshape(-1,2,1,3)
-        print(N_C_to_Rot.shape)
-        print(Rs.shape)
-        rot_vecs = einsum('bnij,bnhj->bi',Rs, N_C_to_Rot)
+        rot_vecs = einsum('bnij,bnhj->bni',Rs, N_C_to_Rot)
         
         #if mask is not None: perturb *= mask[..., None]
         #need to make W=1,0,0,0 for reference Q alter

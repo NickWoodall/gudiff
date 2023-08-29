@@ -133,7 +133,7 @@ class R3Diffuser:
         z = noise_scale * np.random.normal(size=update.shape)
         perturb = (f_t - g_t**2 * update) * dt + g_t * np.sqrt(dt) * z
         
-        x_t_1 = x_t - perturb
+        x_t_1 = x_t + perturb #change to plus
         if mask is not None:
             perturb *= mask[..., None]
         else:
