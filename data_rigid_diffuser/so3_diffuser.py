@@ -4,6 +4,8 @@ import os
 from data_rigid_diffuser import utils as du
 import logging
 import torch
+from torch import einsum
+from scipy.spatial.transform import Rotation
 
 
 def igso3_expansion(omega, eps, L=1000, use_torch=False):
@@ -115,6 +117,102 @@ def score(exp, omega, eps, L=1000, use_torch=False):  # score of density over SO
     else:
         dSigma = dSigma.sum(axis=-1)
     return dSigma / (exp + 1e-4)
+
+
+# Q1 = torch.tensor([0,0,1,0],dtype=torch.float)[None,None,None,...].repeat(2,3,2,1) #90 rotation about Y axis
+# Q2 = torch.tensor([0.7071,0,0.7071,0],dtype=torch.float)[None,None,None,...].repeat(2,3,2,1) #180 rotation about Y axis
+# rv = torch.tensor([[0,0,1]],dtype=torch.float)[None,None,...].repeat(2,3,2,1) #unit Z
+# Q1 = normQ(Q1)
+# Q2 = normQ(Q2)
+
+def multQ(Q1,Q2):
+    """multiply Quaternions"""
+    Qout = torch.zeros((Q1.shape), device=Q1.device)
+    w=0
+    x=1
+    y=2
+    z=3
+
+    Qout[...,w] = Q1[...,w]*Q2[...,x] + Q1[...,x]*Q2[...,w] + Q1[...,y]*Q2[...,z] - Q1[...,z]*Q2[...,y]
+    Qout[...,x] = Q1[...,w]*Q2[...,y] + Q1[...,y]*Q2[...,w] + Q1[...,z]*Q2[...,x] - Q1[...,x]*Q2[...,z]
+    Qout[...,y] = Q1[...,w]*Q2[...,z] + Q1[...,z]*Q2[...,w] + Q1[...,x]*Q2[...,y] - Q1[...,y]*Q2[...,x]
+    Qout[...,z] = Q1[...,w]*Q2[...,w] - Q1[...,x]*Q2[...,x] - Q1[...,y]*Q2[...,y] - Q1[...,z]*Q2[...,z]
+
+    return Qout
+
+def normQ(Q):
+    """normalize a quaternions
+    """
+    return Q / torch.linalg.norm(Q, keepdim=True, dim=-1)
+
+def powerQ(quat_in, power):
+    """Quaternion to the power, represent number of times to rotate Q. Only works on unit Q"""
+    return expQ(scaleQ(lnQ(quat_in),power))
+
+
+def expQ(quat_in, eps=1e-9):
+    """e to Quaternion"""
+    quat_out = torch.zeros_like(quat_in, device=quat_in.device)
+    r = torch.sqrt(torch.sum(torch.square(quat_in[...,1:]),axis=-1,keepdim=True)+eps)
+    et = torch.exp(quat_in[...,0][...,None])
+    s = et*torch.sin(r)/r
+    s[torch.where(r<eps)[0]] = 0
+    
+    quat_out[...,0][...,None] = et*torch.cos(r)
+    quat_out[...,1] = s[...,0]*quat_in[...,1]
+    quat_out[...,2] = s[...,0]*quat_in[...,2]
+    quat_out[...,3] = s[...,0]*quat_in[...,3]
+    
+    return quat_out
+
+
+def lnQ(quat_in, eps=1e-9):
+    """natural log of a quaternion"""
+    quat_out = torch.zeros_like(quat_in, device=quat_in.device)
+    r = torch.sqrt(torch.sum(torch.square(quat_in[...,1:]),axis=-1,keepdim=True)+eps)
+    t = torch.atan2(r,quat_in[...,0][...,None])/r
+    t[torch.where(r<eps)[0]] = 0
+        
+    quat_out[...,0][...,None] = 0.5*torch.log(torch.sum(torch.square(quat_in[...,1:]),axis=-1,keepdim=True)+eps)
+    quat_out[...,1] = t[...,0]*quat_in[...,1]
+    quat_out[...,2] = t[...,0]*quat_in[...,2]
+    quat_out[...,3] = t[...,0]*quat_in[...,3]
+    
+    return quat_out
+    
+
+def scaleQ(quat_in, scale):
+    return torch.multiply(quat_in,scale)
+
+def Rs2Qs(Rs):
+    Qs = torch.zeros((*Rs.shape[:-2],4), device=Rs.device)
+
+    Qs[...,0] = 1.0 + Rs[...,0,0] + Rs[...,1,1] + Rs[...,2,2]
+    Qs[...,1] = 1.0 + Rs[...,0,0] - Rs[...,1,1] - Rs[...,2,2]
+    Qs[...,2] = 1.0 - Rs[...,0,0] + Rs[...,1,1] - Rs[...,2,2]
+    Qs[...,3] = 1.0 - Rs[...,0,0] - Rs[...,1,1] + Rs[...,2,2]
+    Qs[Qs<0.0] = 0.0
+    Qs = torch.sqrt(Qs) / 2.0
+    Qs[...,1] *= torch.sign( Rs[...,2,1] - Rs[...,1,2] )
+    Qs[...,2] *= torch.sign( Rs[...,0,2] - Rs[...,2,0] )
+    Qs[...,3] *= torch.sign( Rs[...,1,0] - Rs[...,0,1] )
+
+    return Qs
+
+def Qs2Rs(Qs):
+    Rs = torch.zeros((*Qs.shape[:-1],3,3), device=Qs.device)
+
+    Rs[...,0,0] = Qs[...,0]*Qs[...,0]+Qs[...,1]*Qs[...,1]-Qs[...,2]*Qs[...,2]-Qs[...,3]*Qs[...,3]
+    Rs[...,0,1] = 2*Qs[...,1]*Qs[...,2] - 2*Qs[...,0]*Qs[...,3]
+    Rs[...,0,2] = 2*Qs[...,1]*Qs[...,3] + 2*Qs[...,0]*Qs[...,2]
+    Rs[...,1,0] = 2*Qs[...,1]*Qs[...,2] + 2*Qs[...,0]*Qs[...,3]
+    Rs[...,1,1] = Qs[...,0]*Qs[...,0]-Qs[...,1]*Qs[...,1]+Qs[...,2]*Qs[...,2]-Qs[...,3]*Qs[...,3]
+    Rs[...,1,2] = 2*Qs[...,2]*Qs[...,3] - 2*Qs[...,0]*Qs[...,1]
+    Rs[...,2,0] = 2*Qs[...,1]*Qs[...,3] - 2*Qs[...,0]*Qs[...,2]
+    Rs[...,2,1] = 2*Qs[...,2]*Qs[...,3] + 2*Qs[...,0]*Qs[...,1]
+    Rs[...,2,2] = Qs[...,0]*Qs[...,0]-Qs[...,1]*Qs[...,1]-Qs[...,2]*Qs[...,2]+Qs[...,3]*Qs[...,3]
+
+    return Rs
 
 
 class SO3Diffuser:
@@ -326,8 +424,53 @@ class SO3Diffuser:
         # Right multiply.
         rot_t = du.compose_rotvec(rot_0, sampled_rots).reshape(rot_0.shape)
         return rot_t, rot_score
+    
+    def reverse(self, update_q: np.ndarray, noised_dict: dict,
+            t: float, dt: float,
+            mask: np.ndarray=None,
+            noise_scale: float=1.0):
+        """Simulates the reverse SDE for 1 step using the Geodesic random walk.
 
-    def reverse(
+        Args:
+            update_q: q that updates rotation
+            t: continuous time in [0, 1].
+            dt: continuous step size in [0, 1].
+            mask: True indicates which residues to diffuse.
+
+        Returns:
+            [..., 3] rotation vector at next step.
+        """
+        if not np.isscalar(t): raise ValueError(f'{t} must be a scalar.')
+
+        g_t = self.diffusion_coef(t)
+        #z = noise_scale * np.random.normal(size=score_t.shape)
+        #random noise step, assumed unbatched
+        rot_vec = self.sample(noise_scale, n_samples= np.cumprod(update_q.shape[:-1])[-1])
+        rotmat = Rotation.from_rotvec(rot_vec).as_matrix()
+        Qs = Rs2Qs(torch.tensor(rotmat))
+        Qs = normQ(Qs)
+        #g_t * np.sqrt(dt) * z
+        rand_noise = g_t * np.sqrt(dt)
+        rand_noise = normQ(powerQ(Qs, rand_noise))
+        #perturb = (g_t ** 2) * score_t * dt + g_t * np.sqrt(dt) * z
+        print(rand_noise.shape)
+        print(update_q.shape)
+        perturb = multQ(powerQ(update_q.reshape((-1,4)), (g_t**2)*dt),rand_noise)
+        
+        
+        Rs = Qs2Rs(perturb).reshape((-1,2,3,3))
+        N_C_to_Rot = torch.cat((noised_dict['N_CA'],
+                                noised_dict['C_CA']),dim=2).reshape(-1,2,1,3)
+        print(N_C_to_Rot.shape)
+        print(Rs.shape)
+        rot_vecs = einsum('bnij,bnhj->bi',Rs, N_C_to_Rot)
+        
+        #if mask is not None: perturb *= mask[..., None]
+        #need to make W=1,0,0,0 for reference Q alter
+
+        return rot_vecs
+
+    def reverse_old(
             self,
             rot_t: np.ndarray,
             score_t: np.ndarray,

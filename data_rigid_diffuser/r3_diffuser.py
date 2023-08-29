@@ -107,8 +107,44 @@ class R3Diffuser:
 
     def score_scaling(self, t: float):
         return 1 / np.sqrt(self.conditional_var(t))
+    
+    def reverse(self, x_t: np.ndarray, update: np.ndarray, 
+                t: float, dt: float, 
+                center: bool=True,
+                noise_scale: float=1.0,
+                mask: np.ndarray=None):
+        """Simulates the reverse SDE for 1 step
 
-    def reverse(
+        Args:
+            x_t: [..., 3] current positions at time t in angstroms.
+            score_t: [..., 3] rotation score at time t.
+            t: continuous time in [0, 1].
+            dt: continuous step size in [0, 1].
+            mask: True indicates which residues to diffuse.
+
+        Returns:
+            [..., 3] positions at next step t-1.
+        """
+        if not np.isscalar(t):
+            raise ValueError(f'{t} must be a scalar.')
+        #x_t = self._scale(x_t) #I scale other places
+        g_t = self.diffusion_coef(t)
+        f_t = self.drift_coef(x_t, t)
+        z = noise_scale * np.random.normal(size=update.shape)
+        perturb = (f_t - g_t**2 * update) * dt + g_t * np.sqrt(dt) * z
+        
+        x_t_1 = x_t - perturb
+        if mask is not None:
+            perturb *= mask[..., None]
+        else:
+            mask = np.ones(x_t.shape[:-1])
+        if center:
+            com = np.sum(x_t_1, axis=-2) / np.sum(mask, axis=-1)[..., None]
+            x_t_1 -= com[..., None, :]
+        #x_t_1 = self._unscale(x_t_1) #I scale other places
+        return x_t_1
+
+    def reverse_old(
             self,
             *,
             x_t: np.ndarray,

@@ -37,7 +37,7 @@ class FrameDiffNoise(torch.nn.Module):
             score_scaling = self.so3d.score_scaling(t)
         return score_scaling
     
-    def forward(self, bb_dict, t_vec=None, cast=torch.float32):
+    def forward(self, bb_dict, t_vec=None, useR3=True , cast=torch.float32):
         
         ca = bb_dict['CA']
         nc_vec = bb_dict['N_CA'].reshape((-1,3))
@@ -45,7 +45,7 @@ class FrameDiffNoise(torch.nn.Module):
         
         if t_vec is None:
             t_vec =  np.random.uniform(size=ca.shape[0])
-        score_scales = [self.score_scaling(t) for t in t_vec]
+        score_scales = [self.score_scaling(t, useR3) for t in t_vec]
         
         #sample rotation
         rot_vec = np.array([self.so3d.sample(t, n_samples=ca.shape[1]) for t in t_vec]).reshape((-1,3))
@@ -86,3 +86,4 @@ class FrameDiffNoise(torch.nn.Module):
         bb_noised_out = {'CA': ca_noised, 'N_CA': nc_vec_noised, 'C_CA': cc_vec_noised}
         
         return bb_noised_out
+    
