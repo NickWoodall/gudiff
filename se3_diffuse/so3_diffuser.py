@@ -308,7 +308,7 @@ class SO3Diffuser:
         """Calculates scaling used for scores during trianing."""
         return self._score_scaling[self.t_to_idx(t)]
 
-    def forward_marginal(self, rot_0: np.ndarray, t: float):
+    def forward_marginal_prev(self, rot_0: np.ndarray, t: float):
         """Samples from the forward diffusion process at time index t.
 
         Args:
@@ -326,6 +326,25 @@ class SO3Diffuser:
         # Right multiply.
         rot_t = du.compose_rotvec(rot_0, sampled_rots).reshape(rot_0.shape)
         return rot_t, rot_score
+    
+    def forward_marginal(self, rot_0: np.ndarray, t: float):
+        """Samples from the forward diffusion process at time index t.
+
+        Args:
+            rot_0: [..., 3] initial rotations.
+            t: continuous time in [0, 1].
+
+        Returns:
+            rot_t: [..., 3] noised rotation vectors.
+            rot_score: [..., 3] score of rot_t as a rotation vector.
+        """
+        n_samples = np.cumprod(rot_0.shape[:-1])[-1]
+        sampled_rots = self.sample(t, n_samples=n_samples)
+        rot_score = self.score(sampled_rots, t).reshape(rot_0.shape)
+
+        # Right multiply.
+        #rot_t = du.compose_rotvec(rot_0, sampled_rots).reshape(rot_0.shape)
+        return sampled_rots, rot_score
 
     def reverse(
             self,

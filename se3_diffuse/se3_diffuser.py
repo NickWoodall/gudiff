@@ -61,8 +61,84 @@ class SE3Diffuser:
 
         self._diffuse_trans = self._se3_conf.diffuse_trans
         self._r3_diffuser = r3_diffuser.R3Diffuser(self._se3_conf.r3)
-
+        
     def forward_marginal(
+            self,
+            bb_dict, 
+            t_vec=None,
+            diffuse_mask: np.ndarray = None,
+            as_tensor_7: bool=True,
+            cast=torch.float32,
+        ):
+        """
+        Args:
+            rigids_0: [..., N] openfold Rigid objects
+            t: continuous time in [0, 1].
+
+        Returns:
+            rigids_t: [..., N] noised rigid. [..., N, 7] if as_tensor_7 is true. 
+            trans_score: [..., N, 3] translation score
+            rot_score: [..., N, 3] rotation score
+            trans_score_norm: [...] translation score norm
+            rot_score_norm: [...] rotation score norm
+        """
+        
+        rigids_0 = ru.Rigid.from_3_points(bb_dict['rigids'][:,:,0,:], 
+                        bb_dict['rigids'][:,:,1,:], 
+                        bb_dict['rigids'][:,:,2,:])
+        
+        ca = bb_dict['CA'] #copy of rigids :,:,1,:
+        nc_vec = bb_dict['N_CA'].reshape((-1,3)) #norm vector of rigid [:,:,1,:]-[:,:,0,:]
+        cc_vec = bb_dict['C_CA'].reshape((-1,3)) #norm vector of rigid [:,:,1,:]-[:,:,2,:]
+        
+        if t_vec is None:
+            t_vec =  np.random.uniform(size=ca.shape[0])
+            
+        trans_0, rot_0 = _extract_trans_rots(rigids_0)
+
+        rot_score_out = np.zeros_like(rot_0)
+        sr_batched = np.zeros_like(rot_0)
+        rot_ss = np.zeros_like(t_vec)
+        
+        trans_t = np.zeros_like(trans_0)
+        trans_score_out = np.zeros_like(trans_0)
+        trans_ss =  np.zeros_like(t_vec)
+        for i,t in enumerate(t_vec):
+            trans_t_single, trans_score = self._r3_diffuser.forward_marginal(trans_0[i], t)
+            trans_t[i] = trans_t_single
+            trans_score_out[i] = trans_score
+            trans_ss[i] = self._r3_diffuser.score_scaling(t)
+            
+            sampled_rots, rot_score = self._so3_diffuser.forward_marginal(rot_0[i], t)
+            rot_score_out[i] = rot_score
+            sr_batched[i] = sampled_rots
+            rot_ss[i] = self._so3_diffuser.score_scaling(t)
+        
+#         rot_t = du.compose_rotvec(rot_0.reshape((-1,3)), sr_batched.reshape((-1,3))).reshape(rot_0.shape)
+#         rigids_t = _assemble_rigid(rot_t, trans_t)
+        
+        rotmat = Rotation.from_rotvec(sr_batched.reshape(-1,3)).as_matrix()
+        batch_shape =  bb_dict['N_CA'].shape# Batch, Length in AA, 3
+        nc_vec_noised = ru.rot_vec_mul(torch.tensor(rotmat,dtype=cast),nc_vec).reshape(batch_shape)
+        cc_vec_noised = ru.rot_vec_mul(torch.tensor(rotmat,dtype=cast),cc_vec).reshape(batch_shape)
+        
+        
+        
+
+#         if as_tensor_7:
+#             rigids_t = rigids_t.to_tensor_7()
+        return {
+            'trans_score': torch.tensor(trans_score_out,dtype=cast),
+            'rot_score': torch.tensor(rot_score_out,dtype=cast),
+            'trans_score_scaling': torch.tensor(trans_ss,dtype=cast),
+            'rot_score_scaling': torch.tensor(rot_ss,dtype=cast),
+            'CA': torch.tensor(trans_t,dtype=cast),
+            'N_CA': nc_vec_noised,
+            'C_CA': cc_vec_noised,
+            'batched_t': torch.tensor(t_vec, dtype=cast)
+        }
+
+    def forward_marginal_prev(
             self,
             rigids_0: ru.Rigid,
             t: float,
