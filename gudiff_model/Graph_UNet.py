@@ -120,6 +120,7 @@ class GraphUNet(torch.nn.Module):
                  edge_feature_dim=1,
                  latent_pool_type = 'avg',
                  t_size = 12,
+                 zero_lin=True,
                  use_tdeg1 = True,
                  cuda=True):
         super(GraphUNet, self).__init__()
@@ -138,6 +139,7 @@ class GraphUNet(torch.nn.Module):
         self.k = k
         self.ts = t_size
         self.use_tdeg1 = use_tdeg1
+        self.zero_lin = zero_lin
         
         self.embed_t = GaussianFourierProjection_Linear(self.ts, use_deg1=self.use_tdeg1)
         self.t_fiber = Fiber({0:self.ts}) #add for change in fiber with self.concat_t
@@ -306,7 +308,8 @@ class GraphUNet(torch.nn.Module):
         self.linear = LinearSE3(fiber_in=self.pre_linear,
                                 fiber_out=fiber_out)
         
-        self.zero_linear()
+        if self.zero_lin:
+            self.zero_linear()
         self.act = nn.SiLU()
         
     def zero_linear(self):
