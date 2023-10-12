@@ -114,6 +114,7 @@ def FAPE_loss(pred, true, score_scales,  d_clamp=10.0, d_clamp_inter=30.0, A=10.
     
     return tot_loss, loss.detach()
 
+
 def FAPE_loss_unscaled(pred, true,  d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, eps=1e-6):
     '''
     Calculate Backbone FAPE loss from RosettaTTAFold

@@ -2,9 +2,30 @@ from data_rigid_diffuser import so3_diffuser
 from data_rigid_diffuser import r3_diffuser
 from scipy.spatial.transform import Rotation
 from data_rigid_diffuser import rigid_utils as ru
+import se3_diffuse.utils as du
 import yaml
 import torch
 import numpy as np
+
+def _extract_trans_rots(rigid: ru.Rigid):
+    rot = rigid.get_rots().get_rot_mats().cpu().numpy()
+    rot_shape = rot.shape
+    num_rots = np.cumprod(rot_shape[:-2])[-1]
+    rot = rot.reshape((num_rots, 3, 3))
+    rot = Rotation.from_matrix(rot).as_rotvec().reshape(rot_shape[:-2] +(3,))
+    tran = rigid.get_trans().cpu().numpy()
+    return tran, rot
+
+def _assemble_rigid(rotvec, trans):
+    rotvec_shape = rotvec.shape
+    num_rotvecs = np.cumprod(rotvec_shape[:-1])[-1]
+    rotvec = rotvec.reshape((num_rotvecs, 3))
+    rotmat = Rotation.from_rotvec(rotvec).as_matrix().reshape(
+        rotvec_shape[:-1] + (3, 3))
+    return ru.Rigid(
+            rots=ru.Rotation(
+                rot_mats=torch.Tensor(rotmat)),
+            trans=torch.tensor(trans))
 
 # Applies to Python-3 Standard Library
 class Struct(object):
@@ -63,6 +84,24 @@ class FrameDiffNoise(torch.nn.Module):
         
         return bb_noised_out, torch.tensor(t_vec,dtype=cast), torch.tensor(score_scales,dtype=cast)
     
+    def score(self, rigids_cur, rigids_init, batched_t):
+        trans_score = self.r3d.score(rigids_cur.get_trans().cpu(), 
+                                    rigids_init.get_trans().cpu(), 
+                                    batched_t[:,None,None].repeat((1,rigids_cur.shape[1],3)).cpu())
+        
+        
+        rots_t = rigids_init.get_rots()
+        rots_0 = rigids_cur.get_rots()
+
+        rots_0_inv = rots_0.invert()
+        quats_0_inv = rots_0_inv.get_quats()
+        quats_t = rots_t.get_quats()
+        quats_0t = ru.quat_multiply(quats_0_inv, quats_t)
+        rotvec_0t = du.quat_to_rotvec(quats_0t)
+        rot_score = self.so3d.torch_score(rotvec_0t, batched_t)
+        
+        return trans_score, rot_score
+    
     def forward_single_t(self, bb_dict, t, cast=torch.float32):
         
         ca = bb_dict['CA']
@@ -86,4 +125,6 @@ class FrameDiffNoise(torch.nn.Module):
         bb_noised_out = {'CA': ca_noised, 'N_CA': nc_vec_noised, 'C_CA': cc_vec_noised}
         
         return bb_noised_out
+    
+ 
     
