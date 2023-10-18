@@ -169,7 +169,7 @@ class R3Diffuser:
         """
         if not np.isscalar(t):
             raise ValueError(f'{t} must be a scalar.')
-        x_t = self._scale(x_t)
+        #x_t = self._scale(x_t)
         g_t = self.diffusion_coef(t)
         f_t = self.drift_coef(x_t, t)
         z = noise_scale * np.random.normal(size=score_t.shape)
@@ -183,7 +183,7 @@ class R3Diffuser:
         if center:
             com = np.sum(x_t_1, axis=-2) / np.sum(mask, axis=-1)[..., None]
             x_t_1 -= com[..., None, :]
-        x_t_1 = self._unscale(x_t_1)
+        #x_t_1 = self._unscale(x_t_1)
         return x_t_1
 
     def conditional_var(self, t, use_torch=False):
