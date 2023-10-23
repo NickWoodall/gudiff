@@ -12,8 +12,8 @@ from gudiff_model import Data_Graph
 
 #find better way to incorporate coord_scale
 #needed
-N_CA_dist = (Data_Graph.N_CA_dist/10.).to('cuda')
-C_CA_dist = (Data_Graph.C_CA_dist/10.).to('cuda')
+N_CA_dist = (Data_Graph.N_CA_dist/10.)
+C_CA_dist = (Data_Graph.C_CA_dist/10.)
 
 #stubs for starting relative NC_CC vecs
 stub = np.array([[-1.45837285,  0 , 0],         #N

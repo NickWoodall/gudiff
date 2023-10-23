@@ -82,7 +82,7 @@ def define_graph_edges(n_nodes):
     
     return v1,v2,edge_data, ind
 
-def make_pe_encoding(n_nodes=65, embed_dim = 12, scale = 10, cast_type=torch.float32, print_out=False):
+def make_pe_encoding(n_nodes=65, embed_dim = 12, scale = 40, cast_type=torch.float32, print_out=False):
     #positional encoding of node, scale dimension optimized for 65
     i_array = np.arange(1,(embed_dim/2)+1)
     wk = (1/(scale**(i_array*2/embed_dim)))
@@ -113,6 +113,55 @@ def normalize(v):
     norm = np.linalg.norm(v,axis=len(v.shape)-1)
     norm[norm == 0] = 1
     return v / norm[...,None]
+
+def pad_n_rows_below_2d_matrix(arr, n, pad_num=-1e9):
+    """Adds n rows of zeros below 2D numpy array matrix.
+
+    :param arr: A two dimensional numpy array that is padded.
+    :param n: the number of rows that are added below the matrix.
+    """
+    padded_array = np.ones((arr.shape[0] + n,)+ arr.shape[1:])*pad_num
+    padded_array[: arr.shape[0], :] = arr
+    return padded_array
+
+class ProteinBB_Dataset(Dataset):
+    def __init__(self, coordinates_list: [np.array], n_nodes=128,
+                 n_atoms=5, coord_div=10, center_mass=True,  cast_type=torch.float32):
+        #prots,#length_prot in aa, #residues/aa, #xyz per atom
+           
+        #alphaFold reduce by 10
+        self.coord_div = coord_div
+        self.n_atoms = 5 #see npose utils
+        
+        
+        
+        self.lenlist = [len(x) for x in coordinates_list]
+        
+        self.prot_coords = np.zeros((len(coordinates_list),n_nodes,n_atoms,3))
+        
+        for i,coordinates in enumerate(coordinates_list):
+            
+            if center_mass:
+                com  = (coordinates[:,:,CA,:].sum(axis=1)[:,None,:]/coordinates[:,:,CA,:].shape[1])[:,None,:]
+                coordinates = coordinates-com
+            
+            coordinates = coordinates/coord_div
+            self.prot_coords[i] = pad_n_rows_below_2d_matrix(coordinates, n_nodes-len(coordinates), pad_num=-1e9)
+
+        
+        self.ca_coords = torch.tensor(self.prot_coords[:,:,CA,:], dtype=cast_type)
+        self.N_CA_vec = torch.tensor(self.prot_coords[:,:,N,:] - self.prot_coords[:,:,CA,:], dtype=cast_type)
+        self.C_CA_vec = torch.tensor(self.prot_coords[:,:,C,:] - self.prot_coords[:,:,CA,:], dtype=cast_type)
+        
+        #unsqueeze to stack together later
+        self.N_CA_vec = torch_normalize(self.N_CA_vec).unsqueeze(2)
+        self.C_CA_vec = torch_normalize(self.C_CA_vec).unsqueeze(2)
+        
+    def __len__(self):
+        return len(self.ca_coords)
+
+    def __getitem__(self, idx):
+        return {'CA':self.ca_coords[idx], 'N_CA':self.N_CA_vec[idx], 'C_CA':self.C_CA_vec[idx]}
 
 class Helix4_Dataset(Dataset):
     def __init__(self, coordinates: np.array, cast_type=torch.float32):
