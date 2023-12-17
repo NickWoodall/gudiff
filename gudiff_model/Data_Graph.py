@@ -142,7 +142,7 @@ class ProteinBB_Dataset(Dataset):
         for i,coordinates in enumerate(coordinates_list):
             
             if center_mass:
-                com  = (coordinates[:,:,CA,:].sum(axis=1)[:,None,:]/coordinates[:,:,CA,:].shape[1])[:,None,:]
+                com  = (coordinates[:,CA,:].sum(axis=0)/coordinates[:,CA,:].shape[0])
                 coordinates = coordinates-com
             
             coordinates = coordinates/coord_div
