@@ -210,6 +210,7 @@ class FrameDiffNoise(torch.nn.Module):
         dict_out['t_vec'] = torch.tensor(t_vec,dtype=cast)
         dict_out['score_scales'] = torch.tensor(score_scales,dtype=cast)
         dict_out['edges_noised'] = torch.tensor(edges_noise,dtype=cast)
+        dict_out['null_mask'] = self.mask_shift
         
         #return bb_noised_out, torch.tensor(t_vec,dtype=cast), torch.tensor(score_scales,dtype=cast), torch.tensor(edges_noise,dtype=cast)
         return dict_out
