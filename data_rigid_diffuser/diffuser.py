@@ -91,6 +91,8 @@ class FrameDiffNoise(torch.nn.Module):
         self.mask_start = None
         self.mask_end = None
         
+        self.node_type_dim = 5
+        
     def score_scaling(self, t, useR3 = True):
         if useR3:
             score_scaling = self.r3d.score_scaling(t)
@@ -160,8 +162,6 @@ class FrameDiffNoise(torch.nn.Module):
     def get_shift_roll(self):
         return self.randstart, self.randroll
         
-        
-    
     def create_edge_fill(self,prot_shape,edge_dim=4,k=30,fill=2):
         """Create full set of values to use as edges will choose whether 1 or 0 during graph making"""
         edge_dim=3  #real and direct connect, real and non-direct, false and direct # no false and not direct
@@ -187,9 +187,8 @@ class FrameDiffNoise(torch.nn.Module):
         nc_vec = self.shift_nodes(bb_dict['N_CA'].squeeze()).reshape((-1,3))
         cc_vec = self.shift_nodes(bb_dict['C_CA'].squeeze()).reshape((-1,3))
         
-        #need to add diffusion for edges calc???
         edge_fill = self.create_edge_fill(ca.shape)
-        edges_noise = np.array([self.ohd.forward_marginal(edge_fill[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
+        #edges_noise = np.array([self.ohd.forward_marginal(edge_fill[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
         
         #sample rotation
         rot_vec = np.array([self.so3d.sample(t, n_samples=ca.shape[1]) for t in t_vec]).reshape((-1,3))
@@ -203,14 +202,22 @@ class FrameDiffNoise(torch.nn.Module):
         ca_noised = np.array([self.r3d.forward_marginal(ca[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
         ca_noised = torch.tensor(ca_noised, dtype=cast)
         
+        #denote nodes feature as real of fake
+        #add dimensions for less noise
+        expand_node_type = torch.ones_like(self.mask_shift.unsqueeze(-1)).repeat((1,)*len(self.mask_shift.shape)+(self.node_type_dim,))
+        expand_node_type =  expand_node_type*self.mask_shift.unsqueeze(-1)
+        node_type_noised = torch.tensor([self.ohd.forward_marginal(expand_node_type[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
+        
         bb_noised_out = {'CA': ca_noised, 'N_CA': nc_vec_noised, 'C_CA': cc_vec_noised}
         
         dict_out = {}
         dict_out['bb_noised'] = bb_noised_out 
         dict_out['t_vec'] = torch.tensor(t_vec,dtype=cast)
         dict_out['score_scales'] = torch.tensor(score_scales,dtype=cast)
-        dict_out['edges_noised'] = torch.tensor(edges_noise,dtype=cast)
-        dict_out['null_mask'] = self.mask_shift
+        dict_out['real_nodes_mask'] = self.mask_shift
+        dict_out['real_nodes_noise'] = node_type_noised
+        dict_out['edge_cons'] = edge_fill
+        
         
         #return bb_noised_out, torch.tensor(t_vec,dtype=cast), torch.tensor(score_scales,dtype=cast), torch.tensor(edges_noise,dtype=cast)
         return dict_out
