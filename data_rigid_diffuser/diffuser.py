@@ -91,7 +91,9 @@ class FrameDiffNoise(torch.nn.Module):
         self.mask_start = None
         self.mask_end = None
         
-        self.node_type_dim = 5
+        self.roll=True
+        
+        self.node_type_dim = 5 #number of voting features for real or null nodes
         
     def score_scaling(self, t, useR3 = True):
         if useR3:
@@ -100,7 +102,8 @@ class FrameDiffNoise(torch.nn.Module):
             score_scaling = self.so3d.score_scaling(t)
         return score_scaling
     
-    def prep_random_shift(self, tens_in, shift=True, roll=True):
+    def prep_random_shift(self, tens_in, shift=True):
+        """records mask for indexing to shift"""
         
         #now take bb_dict and repeat terminal ends and beginnings here
         lengths_aa = (tens_in[:,:,0]>self.minMarker).sum(axis=1)
@@ -120,7 +123,7 @@ class FrameDiffNoise(torch.nn.Module):
         r = torch.arange(tens_in.shape[1])
         
         mask_shift = (randstart[:,None] <= r) & (end[:,None] > r) #index the shifted nodes
-        mask_orig = (torch.zeros((lengths_aa.shape[0],1))<=r) & (lengths_aa[:,None]>r) #index zero index values
+        mask_orig = (torch.zeros((lengths_aa.shape[0],1))<=r) & (lengths_aa[:,None]>r) #index zero index values #are repeated
 
         mask_start = (randstart[:,None] > r)
         mask_end   = (end[:,None] <= r)
@@ -133,14 +136,14 @@ class FrameDiffNoise(torch.nn.Module):
         self.mask_start = mask_start
         self.mask_end = mask_end
         self.randstart = randstart
-        if roll:
-            self.randroll = rng.integers(-tens_in.shape[1],tens_in.shape[1]) #just shift all by one number, enough randomness with shift
+        if self.roll==True:
+            self.randroll = rng.integers(-tens_in.shape[1],tens_in.shape[1]) #just shift all by one number
         else:
             self.randroll = 0
         
     
-    def shift_nodes(self, tens_in, roll=True,shift=True):
-        """Did you call prep shift first"""
+    def shift_nodes(self, tens_in, shift=True):
+        """Shift determines number of repeated endpoints, Roll controls relative position"""
         
         if self.mask_start is None:
             self.prep_random_shift(tens_in,shift=shift)
@@ -154,8 +157,7 @@ class FrameDiffNoise(torch.nn.Module):
         shifted[self.mask_start] =  first_point.repeat((1,shifted.shape[1],1))[self.mask_start]
         shifted[self.mask_end] =  last_point.repeat((1,shifted.shape[1],1))[self.mask_end]
         
-        if roll:
-            shifted = torch.roll(shifted,self.randroll,dims=1)
+        shifted = torch.roll(shifted,self.randroll,dims=1) #roll=0 if self.roll=False
         
         return shifted
     
@@ -206,7 +208,10 @@ class FrameDiffNoise(torch.nn.Module):
         #add dimensions for less noise
         expand_node_type = torch.ones_like(self.mask_shift.unsqueeze(-1)).repeat((1,)*len(self.mask_shift.shape)+(self.node_type_dim,))
         expand_node_type =  expand_node_type*self.mask_shift.unsqueeze(-1)
-        node_type_noised = torch.tensor([self.ohd.forward_marginal(expand_node_type[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
+        
+        node_type_noised = torch.tensor(np.array([self.ohd.forward_marginal(expand_node_type[i].numpy(),t)[0] for i,t in enumerate(t_vec)]))
+        node_type_noised = torch.roll(node_type_noised,self.randroll,dims=1) #roll=0 if self.roll=False
+        
         
         bb_noised_out = {'CA': ca_noised, 'N_CA': nc_vec_noised, 'C_CA': cc_vec_noised}
         
@@ -214,7 +219,7 @@ class FrameDiffNoise(torch.nn.Module):
         dict_out['bb_noised'] = bb_noised_out 
         dict_out['t_vec'] = torch.tensor(t_vec,dtype=cast)
         dict_out['score_scales'] = torch.tensor(score_scales,dtype=cast)
-        dict_out['real_nodes_mask'] = self.mask_shift
+        dict_out['real_nodes_mask'] = torch.roll(self.mask_shift,self.randroll,dims=1)
         dict_out['real_nodes_noise'] = node_type_noised
         dict_out['edge_cons'] = edge_fill
         
