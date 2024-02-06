@@ -189,6 +189,8 @@ class FrameDiffNoise(torch.nn.Module):
         nc_vec = self.shift_nodes(bb_dict['N_CA'].squeeze()).reshape((-1,3))
         cc_vec = self.shift_nodes(bb_dict['C_CA'].squeeze()).reshape((-1,3))
         
+        bb_shifted = {'CA': ca, 'N_CA': nc_vec, 'C_CA': cc_vec}
+        
         edge_fill = self.create_edge_fill(ca.shape)
         #edges_noise = np.array([self.ohd.forward_marginal(edge_fill[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
         
@@ -216,6 +218,7 @@ class FrameDiffNoise(torch.nn.Module):
         bb_noised_out = {'CA': ca_noised, 'N_CA': nc_vec_noised, 'C_CA': cc_vec_noised}
         
         dict_out = {}
+        dict_out['bb_shifted'] = bb_shifted
         dict_out['bb_noised'] = bb_noised_out 
         dict_out['t_vec'] = torch.tensor(t_vec,dtype=cast)
         dict_out['score_scales'] = torch.tensor(score_scales,dtype=cast)

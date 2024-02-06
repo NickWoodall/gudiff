@@ -331,7 +331,8 @@ def concat_monomer_graphs(graph_list):
 
     
     
-#this should probably be already transferred to GPU for speed
+#this should probably be already transferred to GPU for speed... at some point
+#this should probably be already transferred to GPU for speed... at some point
 class Make_nullKNN_MP_Graphs():
     
     #8 long positional encoding
@@ -371,14 +372,14 @@ class Make_nullKNN_MP_Graphs():
             #get null node indices from mask
             real_nodes_feats = torch.round(bb_dict['real_nodes_noise'][j]).clamp(0,1)
             real_nodes_mask = real_nodes_feats.sum(-1)>1.99
-            
+
             #make a knn graph form the real nodes only
             graph = monomer_null_knngraph(caXYZ, real_nodes_mask, k=self.KNN)
             graph.ndata['pe_nf'] = torch.cat((self.pe,real_nodes_feats),dim=-1).type(cast_type)
             graph.ndata['pos'] = caXYZ
             graph.ndata['bb_ori'] = torch.cat((bb_dict['bb_noised']['N_CA'][j], bb_dict['bb_noised']['C_CA'][j]),axis=1)
             graph.ndata['real_nodes_mask']=real_nodes_mask
-            
+
             #gather edge data from all possible noised edges produced
             gsrc, gdst = graph.edges()
             num_edges = len(gsrc)
@@ -389,8 +390,8 @@ class Make_nullKNN_MP_Graphs():
             #actually we need to determine
             null_nodes = torch.arange(self.n_nodes,dtype=torch.int)[~real_nodes_mask]
             real_nodes = torch.arange(self.n_nodes,dtype=torch.int)[real_nodes_mask]
-
-            #broadcast each src/dst node against all null nodes, if any match along node dimension is a null edge
+            
+                        #broadcast each src/dst node against all null nodes, if any match along node dimension is a null edge
             gsrc_compare = (gsrc[:,None] - null_nodes[None,:])
             gdst_compare = (gdst[:,None] - null_nodes[None,:])
             null_edges_src_ind = torch.where(gsrc_compare==0,True,False).any(dim=1)
@@ -406,7 +407,7 @@ class Make_nullKNN_MP_Graphs():
             real_edges = real_edges_src_ind & real_edges_dst_ind
             adj_real = adj_nodes_mask&real_edges
 
-            #is this needed, taken care of a node
+            #edge features likely not needed, taken care of in node features
 
             EDGE_DIM=self.EDGE_FEATURE_DIM
 
@@ -441,51 +442,48 @@ class Make_nullKNN_MP_Graphs():
             #     if gsrc[i] in real_nodes and gdst[i] in real_nodes:
             #         real_edges[i] = 1
 
-            mp_list = torch.zeros((len(list(range(0,len(real_nodes), self.mp_stride)))),caXYZ.shape[1])
+            #max possible mp feats, is +1 for range(start,end,stride) combines with real+null=total + stride rounding 
+            mp_list = torch.zeros((len(list(range(0,self.n_nodes, self.mp_stride)))+1),caXYZ.shape[1])
 
             new_src = torch.tensor([],dtype=torch.int)
             new_dst = torch.tensor([],dtype=torch.int)
 
-
             new_src_rev = torch.tensor([], dtype=torch.int)
             new_dst_rev = torch.tensor([], dtype=torch.int)
 
-            #create
+            #create midpoints for real nodes
             i=0#mp list counter
+            mp_real_node_counter = 0
             for real_index in range(0,len(real_nodes), self.mp_stride):
                 x = real_nodes[real_index] #convert to match torch.int from
                 src, dst = graph.in_edges(x) #dst repeats x, this grab null nodes too
-                
+
                 n_tot = torch.cat((x.unsqueeze(0),src)) #add x to node list
                 mp_list[i] = caXYZ[n_tot].sum(axis=0)/n_tot.shape[0]
                 mp_node = i + graph.num_nodes() #add midpoints nodes at end of graph
+                mp_real_node_counter += 1
                 #define edges between midpoint nodes and nodes defining midpoint for midpointGraph
 
                 new_src = torch.cat((new_src,n_tot))
                 new_dst = torch.cat((new_dst,
                                      (torch.tensor(mp_node,dtype=torch.int).unsqueeze(0).repeat(n_tot.shape[0]))))
-                
-#                 #and reverse graph for coming off
-#                 new_src_rev = torch.cat((new_src_rev,
-#                                          (torch.tensor(mp_node,dtype=torch.int).unsqueeze(0).repeat(n_tot.shape[0]))))
-#                 new_dst_rev = torch.cat((new_dst_rev,n_tot))
 
                 i+=1
-                
+
             #remove extra null nodes from .in_edges call
-            
+
             #remove edges that are null node connections,
             #dst are the midpoint nodes for mpGraph, src are mp nodes for mpGraphRev
             #only remove non-mp nodes
-            
+
             real_mask_rem1 = torch.isin(new_src,real_nodes)
-#             real_mask_rem2 = torch.isin(new_dst_rev,real_nodes) 
+            #             real_mask_rem2 = torch.isin(new_dst_rev,real_nodes) 
             new_src = new_src[real_mask_rem1]
             new_dst = new_dst[real_mask_rem1]
-#             new_src_rev = new_src_rev[real_mask_rem2]
-#             new_dst_rev = new_dst_rev[real_mask_rem2]
-                
-                
+            #             new_src_rev = new_src_rev[real_mask_rem2]
+            #             new_dst_rev = new_dst_rev[real_mask_rem2]
+
+
             #collapse collected null nodes onto null mp of contingous sections 
             end_p = ((null_nodes.roll(1)-null_nodes)==-1) #consecutive are equal to negative one (look right)
             start_p = ((null_nodes.roll(-1)-null_nodes)==1) #consecutive are equal to one (look left)
@@ -507,23 +505,20 @@ class Make_nullKNN_MP_Graphs():
                 sic[1:] = si[1:-1]+roll_con
                 si = sic
 
-            mp_list_null  = torch.ones((si.shape[0],caXYZ.shape[1]))*-1e9
-
-            counter_mp_index = 0 #mp list counter
-            counter_mp_node = 0 #counter for number of mp nodes added, 
+            #mp_list_null  = torch.ones((si.shape[0],caXYZ.shape[1]))*-1e9
+            #add null nodes to the end of mp_list
+            counter_mp_index = 0 #mp list counter, start/end  
             tot_indices = si.shape[0]
             while counter_mp_index < tot_indices:
-                #coll
-                #print(null_nodes[si[counter_mp_index]:ei[counter_mp_index]+1])
+
                 n_tot = null_nodes[si[counter_mp_index]:ei[counter_mp_index]+1]
-            #                 print(len(n_tot))
                 while len(n_tot) <  self.mp_stride and counter_mp_index+1<tot_indices:
+                    #merge non-continuous null nodes smaller than stride
                     counter_mp_index=counter_mp_index+1
                     n_tot = torch.cat([n_tot,null_nodes[si[counter_mp_index]:ei[counter_mp_index]+1]],axis=0)
 
-                mp_list_null[counter_mp_index] = caXYZ[n_tot].sum(axis=0)/n_tot.shape[0]
-                mp_node = counter_mp_node + i + graph.num_nodes() #add midpoints nodes at end of graph
-                counter_mp_node += 1
+                mp_list[i] = caXYZ[n_tot].sum(axis=0)/n_tot.shape[0]
+                mp_node = i + graph.num_nodes() #add midpoints nodes at end of graph
 
                 #from null nodes to new mp_node
                 new_src = torch.cat((new_src,n_tot))
@@ -534,43 +529,43 @@ class Make_nullKNN_MP_Graphs():
                                          (torch.tensor(mp_node,dtype=torch.int).unsqueeze(0).repeat(n_tot.shape[0]))))
                 new_dst_rev = torch.cat((new_dst_rev,n_tot))
 
-                counter_mp_index=counter_mp_index+1
+                i=i+1
+                counter_mp_index += 1
 
-            mp_list_null = mp_list_null[(mp_list_null>-1e8).any(axis=1)]
-            mp_list_real_null = torch.cat([mp_list,mp_list_null])
-            mp_node_indx = torch.arange(0,i+len(mp_list_null)).type(torch.int)
-
-            mpGraph = dgl.graph((new_src,new_dst))
-            mp_pos = torch.cat((caXYZ,mp_list_real_null),axis=0).type(self.cast_type)
+            mp_node_indx = torch.arange(0,len(mp_list)).type(torch.int)    
 
             mpGraph = dgl.graph((new_src,new_dst))
-            mpGraph.ndata['pos'] = torch.cat((caXYZ,mp_list_real_null),axis=0).type(self.cast_type)
-            
+            to_Add = len(mp_list)+graph.num_nodes()-mpGraph.num_nodes()
+            mpGraph.add_nodes(to_Add) #nodes without any use for padding
+            mp_pos = torch.cat((caXYZ,mp_list),axis=0).type(self.cast_type)
+            mpGraph.ndata['pos'] = mp_pos
+
+            mp_real_node_counter
+            mp_real_node_counter = counter_mp_index
+
             #mp real/ null nodes
-            mp_node_real_mask = torch.zeros(mp_list_real_null.shape[0],dtype=torch.int)
-            mp_node_real_mask[:len(mp_list)] = 1
+            mp_node_real_mask = torch.zeros(mp_list.shape[0],dtype=torch.bool)
+            mp_node_real_mask[:mp_real_node_counter] = True
             mpGraph.ndata['mp_node_real_mask'] = torch.cat([real_nodes_mask,mp_node_real_mask])
+
             #match output shape of first transformer
             pe_mp = torch.cat((self.pe,torch.zeros((self.pe.shape[0], self.channels_start-self.pe.shape[1]))),axis=1)
             mpGraph.ndata['pe'] = torch.cat((pe_mp,pe_mp[mp_node_indx]))
             mpGraph.edata['con'] = torch.ones((mpGraph.num_edges(),1))
-
-            #mpGraph_rev = dgl.graph((new_src_rev,new_dst_rev))
             mpGraph_rev = dgl.graph((new_dst,new_src))
-            mpGraph_rev.ndata['pos'] = torch.cat((caXYZ, mp_list_real_null),axis=0).type(self.cast_type)
+            mpGraph_rev.add_nodes(to_Add)
+            mpGraph_rev.ndata['pos'] = torch.cat((caXYZ,mp_list),axis=0).type(self.cast_type)
             mpGraph_rev.ndata['pe'] = torch.cat((pe_mp,pe_mp[mp_node_indx]))
             mpGraph_rev.edata['con'] = torch.ones((mpGraph_rev.num_edges(),1))
             mpGraph_rev.ndata['mp_node_real_mask'] = torch.cat([real_nodes_mask,mp_node_real_mask])
-
             #make graph for self interaction of midpoints
-            v1,v2,edge_data, ind = define_graph_edges(len(mp_list_real_null))
+            v1,v2,edge_data, ind = define_graph_edges(len(mp_list))
             mpSelfGraph = dgl.graph((v1,v2))
             mpSelfGraph.edata['con'] = edge_data.reshape((-1,1))
             mpSelfGraph.ndata['pe'] = self.pe[mp_node_indx] #not really needed
-            mpSelfGraph.ndata['pos'] = mp_list_real_null.type(self.cast_type)
+            mpSelfGraph.ndata['pos'] = mp_list.type(self.cast_type)
 
-
-
+            
             mpSelfGraphList.append(mpSelfGraph)
             mpGraphList.append(mpGraph)
             mpRevGraphList.append(mpGraph_rev)
