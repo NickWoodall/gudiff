@@ -76,6 +76,7 @@ def get_t(N, Ca, C, non_ideal=False, eps=1e-5):
     t = Ts[:,:,None] - Ts[:,:,:,None] # t[0,1] = residue 0 -> residue 1 vector
     return torch.einsum('iblkj, iblmk -> iblmj', Rs, t) # (I,B,L,L,3)
 
+
 def FAPE_loss(pred, true, score_scales,  d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, eps=1e-6):
     '''
     Calculate Backbone FAPE loss from RosettaTTAFold
@@ -100,10 +101,9 @@ def FAPE_loss(pred, true, score_scales,  d_clamp=10.0, d_clamp_inter=30.0, A=10.
 
     difference = torch.clamp(difference, max=clamp)
     loss = difference / A # (I, B, L, L)
-
     # calculate masked loss (ignore missing regions when calculate loss)
     loss = (loss[:,True]).sum(dim=-1) / (torch.ones_like(loss).sum()+eps) # (I)
-
+    
     # weighting loss
 #     w_loss = torch.pow(torch.full((I,), gamma, device=pred.device), torch.arange(I, device=pred.device))
 #     w_loss = torch.flip(w_loss, (0,))
@@ -111,6 +111,94 @@ def FAPE_loss(pred, true, score_scales,  d_clamp=10.0, d_clamp_inter=30.0, A=10.
     w_loss = score_scales[None,None,:,None]
 
     tot_loss = (w_loss * loss).sum()
+    
+    return tot_loss, loss.detach()
+def FAPE_loss_real(pred, true, score_scales, real_mask, 
+                   d_clamp=10.0, d_clamp_inter=30.0, A=10.0, gamma=1.0, eps=1e-6):
+    '''
+    Calculate Backbone FAPE loss from RosettaTTAFold
+    https://github.com/uw-ipd/RoseTTAFold2/blob/main/network/loss.py
+    Input:
+        - pred: predicted coordinates (I, B, L, n_atom, 3)
+        - true: true coordinates (B, L, n_atom, 3)
+    Output: str loss
+    '''
+    batch = true.shape[0]
+    length = true.shape[1]
+    pred = pred.unsqueeze(0) #maybe swap back for consistenccy
+    true = true.unsqueeze(0)
+    
+    t_tilde_ij = get_t(true[:,:,:,0], true[:,:,:,1], true[:,:,:,2])
+    t_ij = get_t(pred[:,:,:,0], pred[:,:,:,1], pred[:,:,:,2])
+    
+    difference = torch.sqrt(torch.square(t_tilde_ij-t_ij).sum(dim=-1) + eps)
+    clamp = torch.zeros_like(difference)
+    # intra vs inter#me coded
+    clamp[:,True] = torch.tensor(d_clamp)
+    difference = torch.clamp(difference, max=clamp)
+    loss = difference / A # (I, B, L, L)
+
+    # n points, becomes nxn comparisons for FAPE LOSS, need to mask both dimensions
+    rm_e = real_mask.repeat((1,length)).reshape(1,batch,length,length)
+    rm_et =  torch.transpose(rm_e,2,3)
+
+    loss_norm_masked = (rm_e*loss*rm_et).sum(dim=(2,3))/((rm_e*rm_et).sum(dim=(2,3)))
+    w_loss = score_scales[None,:]
+
+    tot_loss = (w_loss * loss_norm_masked).sum()
+    
+    return tot_loss, loss.detach()
+
+def FAPE_loss_null(pred, first_point, last_point, real_mask, score_scales,  d_clamp=10.0,
+                   d_clamp_inter=30.0, A=10.0, gamma=0.1, eps=1e-6):
+    '''
+    Calculate Backbone FAPE loss from RosettaTTAFold
+    https://github.com/uw-ipd/RoseTTAFold2/blob/main/network/loss.py
+    Input:
+        - pred: predicted coordinates (I, B, L, n_atom, 3)
+        - first_point: true coordinate (B, 1, n_atom, 3) N-terminal location
+        - last_point: true coordinates (B, 1, n_atom, 3) C-terminal location
+        chooses lowest loss of null to c-terminal/ n-terminal since its indeterminant
+        gamma set to overweight weight of null
+    Output: str loss
+    
+    
+    '''
+    first_point = first_point.unsqueeze(0)
+    last_point = last_point.unsqueeze(0)
+
+    pred = pred.unsqueeze(0) #maybe swap back for consistenccy
+    true = torch.ones_like(pred)
+    null_mask = (~real_mask).unsqueeze(0) 
+
+    #add first and last point to characterize FAPE loss to the closest proper null node (endpoints)
+    flp_pred = torch.concat((first_point,last_point,pred),2)
+    flp_true = torch.concat((first_point,last_point,true),2)
+
+    t_tilde_ij = get_t(flp_true[:,:,:,0], flp_true[:,:,:,1], flp_true[:,:,:,2])
+    t_ij = get_t(flp_pred[:,:,:,0], flp_pred[:,:,:,1], flp_pred[:,:,:,2])
+
+    difference = torch.sqrt(torch.square(t_tilde_ij-t_ij).sum(dim=-1) + eps)
+    clamp = torch.zeros_like(difference)
+    
+    # intra vs inter #multimer monomer i think, #coding out
+    clamp[:,True] = torch.tensor(d_clamp)
+    difference = torch.clamp(difference, max=clamp)
+    
+    #null nodes, least difference to just two points
+    #reduces shape by last dimension
+    difference_fp = difference[:,:,2:,0]
+    difference_lp = difference[:,:,2:,1]
+    nearest_endpoint = difference_lp.clone()
+    nearest_endpoint[difference_fp<difference_lp] = difference_fp[difference_fp<difference_lp]
+    
+    loss = nearest_endpoint / A # (I, B, L)
+    (null_mask*loss).sum(dim=(2))/((null_mask).sum(dim=(2)))
+
+    loss_norm_masked= (null_mask*loss).sum(dim=(2))/((null_mask).sum(dim=(2)))
+    
+    w_loss = score_scales[None,:]
+    tot_loss = (w_loss * loss_norm_masked).sum()
     
     return tot_loss, loss.detach()
 

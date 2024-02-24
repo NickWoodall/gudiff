@@ -159,7 +159,7 @@ class FrameDiffNoise(torch.nn.Module):
         
         shifted = torch.roll(shifted,self.randroll,dims=1) #roll=0 if self.roll=False
         
-        return shifted
+        return shifted, first_point, last_point
     
     def get_shift_roll(self):
         return self.randstart, self.randroll
@@ -185,11 +185,16 @@ class FrameDiffNoise(torch.nn.Module):
         #pass this to gm_maker, mask is saved to object
         self.prep_random_shift(ca)
 
-        ca = self.shift_nodes(ca)
-        nc_vec = self.shift_nodes(bb_dict['N_CA'].squeeze()).reshape((-1,3))
-        cc_vec = self.shift_nodes(bb_dict['C_CA'].squeeze()).reshape((-1,3))
+        ca, first_point, last_point = self.shift_nodes(ca)
+        nc_vec, first_point_nc, last_point_nc = self.shift_nodes(bb_dict['N_CA'].squeeze())
+        cc_vec, first_point_cc, last_point_cc = self.shift_nodes(bb_dict['C_CA'].squeeze())
+
+        nc_vec =  nc_vec.reshape((-1,3))
+        cc_vec = cc_vec.reshape((-1,3))
         
         bb_shifted = {'CA': ca, 'N_CA': nc_vec, 'C_CA': cc_vec}
+        bb_firstp = {'CA': first_point, 'N_CA': first_point_nc, 'C_CA':   first_point_cc}
+        bb_lastp = {'CA': last_point, 'N_CA': last_point_nc, 'C_CA': last_point_cc}
         
         edge_fill = self.create_edge_fill(ca.shape)
         #edges_noise = np.array([self.ohd.forward_marginal(edge_fill[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
@@ -219,7 +224,10 @@ class FrameDiffNoise(torch.nn.Module):
         
         dict_out = {}
         dict_out['bb_shifted'] = bb_shifted
+        dict_out['bb_firstp'] = bb_firstp
+        dict_out['bb_lastp'] = bb_lastp
         dict_out['bb_noised'] = bb_noised_out 
+        
         dict_out['t_vec'] = torch.tensor(t_vec,dtype=cast)
         dict_out['score_scales'] = torch.tensor(score_scales,dtype=cast)
         dict_out['real_nodes_mask'] = torch.roll(self.mask_shift,self.randroll,dims=1)

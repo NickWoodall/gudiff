@@ -370,8 +370,11 @@ class Make_nullKNN_MP_Graphs():
         for j, caXYZ in enumerate(bb_dict['bb_noised']['CA']):
             #round nodes to be real (1) or (null 0)
             #get null node indices from mask
-            real_nodes_feats = torch.round(bb_dict['real_nodes_noise'][j]).clamp(0,1)
-            real_nodes_mask = real_nodes_feats.sum(-1)>1.99
+            
+            real_nodes_feats = bb_dict['real_nodes_noise'][j].clamp(0,1)
+            
+            real_nodes_fround = torch.round(bb_dict['real_nodes_noise'][j]).clamp(0,1)
+            real_nodes_mask = real_nodes_fround.sum(-1)>1.99
 
             #make a knn graph form the real nodes only
             graph = monomer_null_knngraph(caXYZ, real_nodes_mask, k=self.KNN)
