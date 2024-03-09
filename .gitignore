@@ -122,3 +122,4 @@ venv.bak/
 log/*
 output/*
 data_npose/*
+GUN_checkpoints/*
