@@ -73,7 +73,7 @@ class Struct(object):
 class FrameDiffNoise(torch.nn.Module):
     """Generate Diffusion Noise based on FrameDiff"""
     
-    def __init__(self, config_path='data_rigid_diffuser/base.yaml'):
+    def __init__(self, config_path='data_rigid_diffuser/base.yaml', roll=True):
         super().__init__()
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
@@ -91,7 +91,7 @@ class FrameDiffNoise(torch.nn.Module):
         self.mask_start = None
         self.mask_end = None
         
-        self.roll=True
+        self.roll=roll
         
         self.node_type_dim = 5 #number of voting features for real or null nodes
         

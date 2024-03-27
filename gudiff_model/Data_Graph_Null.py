@@ -342,15 +342,19 @@ class Make_nullKNN_MP_Graphs():
     
     def __init__(self, KNN=30, mp_stride=4, n_nodes=128, coord_div=10, 
                        cast_type=torch.float32, channels_start=32,
-                       ndf1=6, ndf0=32,embed_dim_pe=12, nr_node_feats=5,cuda=True):
+                       ndf1=6, ndf0=32,embed_dim_pe=12, nr_node_feats=5,cuda=True, real_threshold=1.99, pe_circ_encode=True):
         
         self.KNN = KNN
         self.n_nodes = n_nodes
-        self.pe = circular_pe_encoding(n_nodes=n_nodes,embed_dim=embed_dim_pe, cast_type=torch.float32)
+        if pe_circ_encode:
+            self.pe = circular_pe_encoding(n_nodes=n_nodes,embed_dim=embed_dim_pe, cast_type=torch.float32)
+        else:
+            self.pe = make_pe_encoding(n_nodes=n_nodes, embed_dim = embed_dim_pe, scale = 40, cast_type=torch.float32, print_out=False)
         self.mp_stride = mp_stride
         self.null_stride = mp_stride*2
         self.cast_type = cast_type
         self.channels_start = channels_start
+        self.real_threshold = real_threshold
         
         
         
@@ -374,7 +378,7 @@ class Make_nullKNN_MP_Graphs():
             real_nodes_feats = bb_dict['real_nodes_noise'][j].clamp(0,1)
             
             real_nodes_fround = torch.round(bb_dict['real_nodes_noise'][j]).clamp(0,1)
-            real_nodes_mask = real_nodes_fround.sum(-1)>1.99
+            real_nodes_mask = real_nodes_fround.sum(-1) > self.real_threshold
 
             #make a knn graph form the real nodes only
             graph = monomer_null_knngraph(caXYZ, real_nodes_mask, k=self.KNN)

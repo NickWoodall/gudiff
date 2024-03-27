@@ -330,8 +330,9 @@ class GraphUNet_Null(torch.nn.Module):
         self.sig = nn.Sigmoid()
         
     def zero_linear(self):
-        """Zero linear weights of degree one only."""
+        """Zero linear weights (final layer)."""
         nn.init.zeros_(self.linear.weights['1'])
+        nn.init.zeros_(self.linear.weights['0'])
         
     def concat_mp_feats(self, ca_feats_in, mp_feats):
         """Concatenate the mp and calpha feats, by debatching batched graph"""

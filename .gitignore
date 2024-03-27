@@ -123,3 +123,4 @@ log/*
 output/*
 data_npose/*
 GUN_checkpoints/*
+Eval_Direc/*
