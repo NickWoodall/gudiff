@@ -73,7 +73,7 @@ class Struct(object):
 class FrameDiffNoise(torch.nn.Module):
     """Generate Diffusion Noise based on FrameDiff"""
     
-    def __init__(self, config_path='data_rigid_diffuser/base.yaml', roll=True):
+    def __init__(self, config_path='data_rigid_diffuser/base.yaml', max_t = 1.0, roll=True):
         super().__init__()
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
@@ -92,6 +92,7 @@ class FrameDiffNoise(torch.nn.Module):
         self.mask_end = None
         
         self.roll=roll
+        self.max_t = max_t
         
         self.node_type_dim = 5 #number of voting features for real or null nodes
         
@@ -179,7 +180,7 @@ class FrameDiffNoise(torch.nn.Module):
         ca = bb_dict['CA']
         
         if t_vec is None:
-            t_vec =  np.random.uniform(size=ca.shape[0])
+            t_vec =  np.random.uniform(size=ca.shape[0])*self.max_t
         score_scales = np.array([self.score_scaling(t, useR3) for t in t_vec])
         
         #pass this to gm_maker, mask is saved to object

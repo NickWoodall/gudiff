@@ -45,7 +45,7 @@ PAIR_FEATS = [
 ]
 
 
-move_to_np = lambda x: x.cpu().detach().numpy()
+move_to_np = lambda x: x.detach().cpu().numpy() #swapped order
 aatype_to_seq = lambda aatype: ''.join([
         residue_constants.restypes_with_x[x] for x in aatype])
 
