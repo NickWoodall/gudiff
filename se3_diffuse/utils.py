@@ -7,7 +7,7 @@ import collections
 #from omegaconf import OmegaConf
 import dataclasses
 # from se3_diffuse import chemical
-# from se3_diffuse import residue_constants
+from se3_diffuse import residue_constants
 # from se3_diffuse import protein
 from se3_diffuse import so3_utils
 from se3_diffuse import rigid_utils

@@ -94,8 +94,9 @@ def _retrieve_mmcif_files(
     return all_mmcif_paths
 
 
+
 def process_mmcif(
-        mmcif_path: str, max_resolution: int, max_len: int, write_dir: str):
+        mmcif_path: str, max_resolution: int, max_len: int, write_dir: str, simple : bool=False):
     """Processes MMCIF files into usable, smaller pickles.
 
     Args:
@@ -122,8 +123,11 @@ def process_mmcif(
     metadata['processed_path'] = processed_mmcif_path
     try:
         with open(mmcif_path, 'r') as f:
-            parsed_mmcif = mmcif_parsing.parse(
-                file_id=mmcif_name, mmcif_string=f.read())
+            if simple:
+                parsed_mmcif = mmcif_parsing.parse(file_id=mmcif_name, mmcif_string=f.read(),
+                                                    catch_all_errors=False,simple=True)
+            else:
+                parsed_mmcif = mmcif_parsing.parse(file_id=mmcif_name, mmcif_string=f.read())
     except:
         raise errors.FileExistsError(
             f'Error file do not exist {mmcif_path}'
@@ -149,16 +153,22 @@ def process_mmcif(
     metadata['oligomeric_detail'] = oligomeric_detail
 
     # Parse mmcif header
-    mmcif_header = parsed_mmcif.header
-    mmcif_resolution = mmcif_header['resolution']
-    metadata['resolution'] = mmcif_resolution
-    metadata['structure_method'] = mmcif_header['structure_method']
-    if mmcif_resolution >= max_resolution:
-        raise errors.ResolutionError(
-            f'Too high resolution {mmcif_resolution}')
-    if mmcif_resolution == 0.0:
-        raise errors.ResolutionError(
-            f'Invalid resolution {mmcif_resolution}')
+    if not simple:
+        mmcif_header = parsed_mmcif.header
+        mmcif_resolution = mmcif_header['resolution']
+        metadata['resolution'] = mmcif_resolution
+        metadata['structure_method'] = mmcif_header['structure_method']
+    else:
+        metadata['resolution'] = 0
+        metadata['structure_method'] = 'generated'
+    
+    if not simple:
+        if mmcif_resolution >= max_resolution:
+            raise errors.ResolutionError(
+                f'Too high resolution {mmcif_resolution}')
+        if mmcif_resolution == 0.0:
+            raise errors.ResolutionError(
+                f'Invalid resolution {mmcif_resolution}')
 
     # Extract all chains
     struct_chains = {
@@ -193,9 +203,10 @@ def process_mmcif(
     metadata['seq_len'] = len(complex_aatype)
     metadata['modeled_seq_len'] = max_modeled_idx - min_modeled_idx + 1
     complex_feats['modeled_idx'] = modeled_idx
-    if complex_aatype.shape[0] > max_len:
-        raise errors.LengthError(
-            f'Too long {complex_aatype.shape[0]}')
+    if not simple:
+        if complex_aatype.shape[0] > max_len:
+            raise errors.LengthError(
+                f'Too long {complex_aatype.shape[0]}')
 
     try:
         
@@ -235,8 +246,167 @@ def process_mmcif(
     return metadata
 
 
+# def process_mmcif(
+#         mmcif_path: str, max_resolution: int, max_len: int, write_dir: str):
+#     """Processes MMCIF files into usable, smaller pickles.
+
+#     Args:
+#         mmcif_path: Path to mmcif file to read.
+#         max_resolution: Max resolution to allow.
+#         max_len: Max length to allow.
+#         write_dir: Directory to write pickles to.
+
+#     Returns:
+#         Saves processed protein to pickle and returns metadata.
+
+#     Raises:
+#         DataError if a known filtering rule is hit.
+#         All other errors are unexpected and are propogated.
+#     """
+#     metadata = {}
+#     mmcif_name = os.path.basename(mmcif_path).replace('.cif', '')
+#     metadata['pdb_name'] = mmcif_name
+#     mmcif_subdir = os.path.join(write_dir, mmcif_name[1:3].lower())
+#     if not os.path.isdir(mmcif_subdir):
+#         os.mkdir(mmcif_subdir)
+#     processed_mmcif_path = os.path.join(mmcif_subdir, f'{mmcif_name}.pkl')
+#     processed_mmcif_path = os.path.abspath(processed_mmcif_path)
+#     metadata['processed_path'] = processed_mmcif_path
+#     try:
+#         with open(mmcif_path, 'r') as f:
+#             parsed_mmcif = mmcif_parsing.parse(
+#                 file_id=mmcif_name, mmcif_string=f.read())
+#     except:
+#         raise errors.FileExistsError(
+#             f'Error file do not exist {mmcif_path}'
+#         )
+#     metadata['raw_path'] = mmcif_path
+#     if parsed_mmcif.errors:
+#         raise errors.MmcifParsingError(
+#             f'Encountered errors {parsed_mmcif.errors}'
+#         )
+#     parsed_mmcif = parsed_mmcif.mmcif_object
+#     raw_mmcif = parsed_mmcif.raw_string
+#     if '_pdbx_struct_assembly.oligomeric_count' in raw_mmcif:
+#         raw_olig_count = raw_mmcif['_pdbx_struct_assembly.oligomeric_count']
+#         oligomeric_count = ','.join(raw_olig_count).lower()
+#     else:
+#         oligomeric_count = None
+#     if '_pdbx_struct_assembly.oligomeric_details' in raw_mmcif:
+#         raw_olig_detail = raw_mmcif['_pdbx_struct_assembly.oligomeric_details']
+#         oligomeric_detail = ','.join(raw_olig_detail).lower()
+#     else:
+#         oligomeric_detail = None
+#     metadata['oligomeric_count'] = oligomeric_count
+#     metadata['oligomeric_detail'] = oligomeric_detail
+
+#     # Parse mmcif header
+#     mmcif_header = parsed_mmcif.header
+#     mmcif_resolution = mmcif_header['resolution']
+#     metadata['resolution'] = mmcif_resolution
+#     metadata['structure_method'] = mmcif_header['structure_method']
+#     if mmcif_resolution >= max_resolution:
+#         raise errors.ResolutionError(
+#             f'Too high resolution {mmcif_resolution}')
+#     if mmcif_resolution == 0.0:
+#         raise errors.ResolutionError(
+#             f'Invalid resolution {mmcif_resolution}')
+
+#     # Extract all chains
+#     struct_chains = {
+#         chain.id.upper(): chain
+#         for chain in parsed_mmcif.structure.get_chains()}
+#     metadata['num_chains'] = len(struct_chains)
+
+#     # Extract features
+#     struct_feats = []
+#     all_seqs = set()
+#     for chain_id, chain in struct_chains.items():
+#         # Convert chain id into int
+#         chain_id = du.chain_str_to_int(chain_id)
+#         chain_prot = parsers.process_chain(chain, chain_id)
+#         chain_dict = dataclasses.asdict(chain_prot)
+#         chain_dict = du.parse_chain_feats(chain_dict)
+#         all_seqs.add(tuple(chain_dict['aatype']))
+#         struct_feats.append(chain_dict)
+#     if len(all_seqs) == 1:
+#         metadata['quaternary_category'] = 'homomer'
+#     else:
+#         metadata['quaternary_category'] = 'heteromer'
+#     complex_feats = du.concat_np_features(struct_feats, False)
+
+#     # Process geometry features
+#     complex_aatype = complex_feats['aatype']
+#     modeled_idx = np.where(complex_aatype != 20)[0]
+#     if np.sum(complex_aatype != 20) == 0:
+#         raise errors.LengthError('No modeled residues')
+#     min_modeled_idx = np.min(modeled_idx)
+#     max_modeled_idx = np.max(modeled_idx)
+#     metadata['seq_len'] = len(complex_aatype)
+#     metadata['modeled_seq_len'] = max_modeled_idx - min_modeled_idx + 1
+#     complex_feats['modeled_idx'] = modeled_idx
+#     if complex_aatype.shape[0] > max_len:
+#         raise errors.LengthError(
+#             f'Too long {complex_aatype.shape[0]}')
+
+#     try:
+        
+#         # Workaround for MDtraj not supporting mmcif in their latest release.
+#         # MDtraj source does support mmcif https://github.com/mdtraj/mdtraj/issues/652
+#         # We temporarily save the mmcif as a pdb and delete it after running mdtraj.
+#         p = MMCIFParser()
+#         struc = p.get_structure("", mmcif_path)
+#         io = PDBIO()
+#         io.set_structure(struc)
+#         pdb_path = mmcif_path.replace('.cif', '.pdb')
+#         io.save(pdb_path)
+
+#         # MDtraj
+#         traj = md.load(pdb_path)
+#         # SS calculation
+#         pdb_ss = md.compute_dssp(traj, simplified=True)
+#         # DG calculation
+#         pdb_dg = md.compute_rg(traj)
+#         os.remove(pdb_path)
+#     except Exception as e:
+#         os.remove(pdb_path)
+#         raise errors.DataError(f'Mdtraj failed with error {e}')
+
+#     chain_dict['ss'] = pdb_ss[0]
+#     metadata['coil_percent'] = np.sum(pdb_ss == 'C') / metadata['modeled_seq_len']
+#     metadata['helix_percent'] = np.sum(pdb_ss == 'H') / metadata['modeled_seq_len']
+#     metadata['strand_percent'] = np.sum(pdb_ss == 'E') / metadata['modeled_seq_len']
+
+#     # Radius of gyration
+#     metadata['radius_gyration'] = pdb_dg[0]
+
+#     # Write features to pickles.
+#     du.write_pkl(processed_mmcif_path, complex_feats)
+
+#     # Return metadata
+#     return metadata
+
+
+# def process_serially(
+#         all_mmcif_paths, max_resolution, max_len, write_dir):
+#     all_metadata = []
+#     for i, mmcif_path in enumerate(all_mmcif_paths):
+#         try:
+#             start_time = time.time()
+#             metadata = process_mmcif(
+#                 mmcif_path,
+#                 max_resolution,
+#                 max_len,
+#                 write_dir)
+#             elapsed_time = time.time() - start_time
+#             print(f'Finished {mmcif_path} in {elapsed_time:2.2f}s')
+#             all_metadata.append(metadata)
+#         except errors.DataError as e:
+#             print(f'Failed {mmcif_path}: {e}')
+#     return all_metadata
+
 def process_serially(
-        all_mmcif_paths, max_resolution, max_len, write_dir):
+        all_mmcif_paths, max_resolution, max_len, write_dir, simple=False):
     all_metadata = []
     for i, mmcif_path in enumerate(all_mmcif_paths):
         try:
@@ -245,7 +415,7 @@ def process_serially(
                 mmcif_path,
                 max_resolution,
                 max_len,
-                write_dir)
+                write_dir, simple=simple)
             elapsed_time = time.time() - start_time
             print(f'Finished {mmcif_path} in {elapsed_time:2.2f}s')
             all_metadata.append(metadata)

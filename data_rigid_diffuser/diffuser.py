@@ -103,7 +103,7 @@ class FrameDiffNoise(torch.nn.Module):
             score_scaling = self.so3d.score_scaling(t)
         return score_scaling
     
-    def prep_random_shift(self, tens_in, shift=True):
+    def prep_random_shift(self, tens_in, shift=True, no_mask=False):
         """records mask for indexing to shift"""
         
         #now take bb_dict and repeat terminal ends and beginnings here
@@ -113,7 +113,8 @@ class FrameDiffNoise(torch.nn.Module):
         
         #randomize position of protein in nodes
         rng = np.random.default_rng()
-        if shift:
+        
+        if shift and not no_mask:
             randstart = torch.tensor(rng.integers(0,max_possible_starts)) #exclusive high value, inclusive low
         else:
             randstart = torch.zeros_like(max_possible_starts)
@@ -152,13 +153,14 @@ class FrameDiffNoise(torch.nn.Module):
         #get first and last xyz for filling
         first_point = tens_in[:,0,...][:,None,...]
         last_point = tens_in.gather(1,self.last_gi)
-        
-        shifted = torch.zeros_like(tens_in)
-        shifted[self.mask_shift] = tens_in[self.mask_orig]
-        shifted[self.mask_start] =  first_point.repeat((1,shifted.shape[1],1))[self.mask_start]
-        shifted[self.mask_end] =  last_point.repeat((1,shifted.shape[1],1))[self.mask_end]
-        
-        shifted = torch.roll(shifted,self.randroll,dims=1) #roll=0 if self.roll=False
+        if shift:
+            shifted = torch.zeros_like(tens_in)
+            shifted[self.mask_shift] = tens_in[self.mask_orig]
+            shifted[self.mask_start] =  first_point.repeat((1,shifted.shape[1],1))[self.mask_start]
+            shifted[self.mask_end] =  last_point.repeat((1,shifted.shape[1],1))[self.mask_end]
+            shifted = torch.roll(shifted,self.randroll,dims=1) #roll=0 if self.roll=False
+        else:
+            shifted=tens_in.clone()
         
         return shifted, first_point, last_point
     
@@ -175,8 +177,8 @@ class FrameDiffNoise(torch.nn.Module):
         
         return edge_fill
     
-    def forward(self, bb_dict, t_vec=None, k=30, useR3=True , cast=torch.float32, roll=True):
-        
+    def forward_with_null(self, bb_dict, t_vec=None, node_feats=None, k=30, useR3=True ,
+                cast=torch.float32, shift=True, roll=False, no_mask=False):
         ca = bb_dict['CA']
         
         if t_vec is None:
@@ -184,11 +186,12 @@ class FrameDiffNoise(torch.nn.Module):
         score_scales = np.array([self.score_scaling(t, useR3) for t in t_vec])
         
         #pass this to gm_maker, mask is saved to object
-        self.prep_random_shift(ca)
-
-        ca, first_point, last_point = self.shift_nodes(ca)
-        nc_vec, first_point_nc, last_point_nc = self.shift_nodes(bb_dict['N_CA'].squeeze())
-        cc_vec, first_point_cc, last_point_cc = self.shift_nodes(bb_dict['C_CA'].squeeze())
+        self.prep_random_shift(ca, shift=shift, no_mask=no_mask) #creates real/null mask based on inputs
+        
+        ###############Follow along here 
+        ca, first_point, last_point = self.shift_nodes(ca, shift=shift)
+        nc_vec, first_point_nc, last_point_nc = self.shift_nodes(bb_dict['N_CA'].squeeze(), shift=shift)
+        cc_vec, first_point_cc, last_point_cc = self.shift_nodes(bb_dict['C_CA'].squeeze(), shift=shift)
 
         nc_vec =  nc_vec.reshape((-1,3))
         cc_vec = cc_vec.reshape((-1,3))
@@ -214,11 +217,17 @@ class FrameDiffNoise(torch.nn.Module):
         
         #denote nodes feature as real of fake
         #add dimensions for less noise
+        
         expand_node_type = torch.ones_like(self.mask_shift.unsqueeze(-1)).repeat((1,)*len(self.mask_shift.shape)+(self.node_type_dim,))
         expand_node_type =  expand_node_type*self.mask_shift.unsqueeze(-1)
         
-        node_type_noised = torch.tensor(np.array([self.ohd.forward_marginal(expand_node_type[i].numpy(),t)[0] for i,t in enumerate(t_vec)]))
-        node_type_noised = torch.roll(node_type_noised,self.randroll,dims=1) #roll=0 if self.roll=False
+        if node_feats is None:
+            node_type_noised = np.array([self.ohd.forward_marginal(expand_node_type[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
+            node_type_noised = torch.tensor(node_type_noised)
+            node_type_noised = torch.roll(node_type_noised,self.randroll,dims=1) #roll=0 if self.roll=False
+        else:
+            node_type_noised = np.array([self.ohd.forward_marginal(node_feats[i].numpy(),t)[0] for i,t in enumerate(t_vec)])
+            node_type_noised = torch.tensor(node_type_noised)
         
         
         bb_noised_out = {'CA': ca_noised, 'N_CA': nc_vec_noised, 'C_CA': cc_vec_noised}
@@ -264,6 +273,36 @@ class FrameDiffNoise(torch.nn.Module):
         bb_noised_out = {'CA': ca_noised, 'N_CA': nc_vec_noised, 'C_CA': cc_vec_noised}
         
         return bb_noised_out, torch.tensor(t_vec,dtype=cast), torch.tensor(score_scales,dtype=cast)
+    
+    def forward(self, bb_dict, t=None, useR3=True , cast=torch.float32):
+        """single t value"""
+        ca = bb_dict['CA']
+        nc_vec = bb_dict['N_CA'].reshape((-1,3))
+        cc_vec = bb_dict['C_CA'].reshape((-1,3))
+        
+        if t is None:
+            t =  np.random.uniform(size=1)[0]
+        score_scales = self.score_scaling(t, useR3)
+        
+        #sample rotation
+        rot_vec = np.array(self.so3d.sample(t, n_samples=ca.shape[0])).reshape((-1,3))
+        rotmat = Rotation.from_rotvec(rot_vec).as_matrix()
+        
+        batch_shape =  bb_dict['N_CA'].shape
+        nc_vec_noised = ru.rot_vec_mul(torch.tensor(rotmat,dtype=cast),nc_vec).reshape(batch_shape)
+        cc_vec_noised = ru.rot_vec_mul(torch.tensor(rotmat,dtype=cast),cc_vec).reshape(batch_shape)
+        
+        #get apply transation to CA
+        ca_noised = np.array(self.r3d.forward_marginal(ca.numpy(),t)[0])
+        ca_noised = torch.tensor(ca_noised, dtype=cast)
+        
+        bb_noised = {    'CA_noised': ca_noised, 
+                         'N_CA_noised': nc_vec_noised,
+                         'C_CA_noised': cc_vec_noised,
+                         't': torch.tensor(t, dtype=cast),
+                         'score_scale': torch.tensor(score_scales,dtype=cast)}
+        
+        return bb_noised
     
     def score(self, rigids_cur, rigids_init, batched_t):
         trans_score = self.r3d.score(rigids_cur.get_trans().cpu(), 

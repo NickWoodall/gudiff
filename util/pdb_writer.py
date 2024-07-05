@@ -28,6 +28,27 @@ def roll2_continous_true(real_mask_in):
     return roll_con_out
 
 
+def pred_to_pdb(pred, pred_mask, pdb_str='pred_revtest',
+                outdir='output/', coord_scale=10.0, num_out=1):
+    
+    pnk_dir = f'{outdir}/reverse_test/'
+    if not os.path.isdir(pnk_dir) and pred_mask is not None:
+        os.makedirs(pnk_dir)
+    
+    for x,c in enumerate(pred):
+        if x>= num_out:
+            break
+        p_o = pred[x].detach().to('cpu').numpy()*coord_scale
+        pm = pred_mask[x].detach().to('cpu').numpy()
+        if pm.sum()<1:
+            with open(f'{pnk_dir}/null_{t_val[x]*100:.0f}_e{e}_{x}.txt','w') as f:
+                f.write(f'These pred masks at index {x} have no members.')
+            continue
+        else:
+            dump_coord_pdb(p_o[pm], fileOut=f'{pnk_dir}/{pdb_str}_{x}.pdb')
+    
+
+
 def dump_tnp_null(true, noise, pred, t_val,
                   e=0, 
                   numOut=1, 
