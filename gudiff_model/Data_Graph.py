@@ -250,7 +250,7 @@ class Make_KNN_MP_Graphs():
         
         for j, caXYZ in enumerate(bb_dict['CA']):
             graph = dgl.knn_graph(caXYZ, self.KNN)
-            graph.ndata['pe'] = self.pe
+            graph.ndata['pe'] = self.pe.to(caXYZ.device)
             graph.ndata['pos'] = caXYZ
             graph.ndata['bb_ori'] = torch.cat((bb_dict['N_CA'][j],  bb_dict['C_CA'][j]),axis=1)
             
@@ -258,28 +258,28 @@ class Make_KNN_MP_Graphs():
             esrc, edst = graph.edges()
             graph.edata['con'] = (torch.abs(esrc-edst)==1).type(self.cast_type).reshape((-1,1))
             
-            mp_list = torch.zeros((len(list(range(0,self.n_nodes, self.mp_stride))),caXYZ.shape[1]))
+            mp_list = torch.zeros((len(list(range(0,self.n_nodes, self.mp_stride))),caXYZ.shape[1]),device=caXYZ.device)
             
-            new_src = torch.tensor([],dtype=torch.int)
-            new_dst = torch.tensor([],dtype=torch.int)
+            new_src = torch.tensor([],dtype=torch.int,device=caXYZ.device)
+            new_dst = torch.tensor([],dtype=torch.int,device=caXYZ.device)
             
-            new_src_rev = torch.tensor([], dtype=torch.int)
-            new_dst_rev = torch.tensor([], dtype=torch.int)
+            new_src_rev = torch.tensor([], dtype=torch.int,device=caXYZ.device)
+            new_dst_rev = torch.tensor([], dtype=torch.int,device=caXYZ.device)
            
             i=0#mp list counter
             for x in range(0,self.n_nodes, self.mp_stride):
                 src, dst = graph.in_edges(x) #dst repeats x
-                n_tot = torch.cat((torch.tensor(x).unsqueeze(0),src)) #add x to node list
+                n_tot = torch.cat((torch.tensor(x,device=caXYZ.device).unsqueeze(0),src)) #add x to node list
                 mp_list[i] = caXYZ[n_tot].sum(axis=0)/n_tot.shape[0]
                 mp_node = i + graph.num_nodes() #add midpoints nodes at end of graph
                 #define edges between midpoint nodes and nodes defining midpoint for midpointGraph
                 
                 new_src = torch.cat((new_src,n_tot))
                 new_dst = torch.cat((new_dst,
-                                     (torch.tensor(mp_node).unsqueeze(0).repeat(n_tot.shape[0]))))
+                                     (torch.tensor(mp_node,device=caXYZ.device).unsqueeze(0).repeat(n_tot.shape[0]))))
                 #and reverse graph for coming off
                 new_src_rev = torch.cat((new_src_rev,
-                                         (torch.tensor(mp_node).unsqueeze(0).repeat(n_tot.shape[0]))))
+                                         (torch.tensor(mp_node,device=caXYZ.device).unsqueeze(0).repeat(n_tot.shape[0]))))
                 new_dst_rev = torch.cat((new_dst_rev,n_tot))
                 
                 i+=1
@@ -288,20 +288,26 @@ class Make_KNN_MP_Graphs():
             mpGraph.ndata['pos'] = torch.cat((caXYZ,mp_list),axis=0).type(self.cast_type)
             mp_node_indx = torch.arange(0,self.n_nodes, self.mp_stride).type(torch.int)
             #match output shape of first transformer
-            pe_mp = torch.cat((self.pe,torch.zeros((self.pe.shape[0],self.channels_start-self.pe.shape[1]))),axis=1)
+            pe_mp = torch.cat(
+                              (self.pe.to(caXYZ.device),
+                              torch.zeros( (self.pe.shape[0],
+                                            self.channels_start-self.pe.shape[1]),
+                                                device=caXYZ.device))
+                                                                     ,axis=1)
             mpGraph.ndata['pe'] = torch.cat((pe_mp,pe_mp[mp_node_indx]))
-            mpGraph.edata['con'] = torch.zeros((mpGraph.num_edges(),1))
+            mpGraph.edata['con'] = torch.zeros((mpGraph.num_edges(),1),device=caXYZ.device)
             
             mpGraph_rev = dgl.graph((new_src_rev,new_dst_rev))
             mpGraph_rev.ndata['pos'] = torch.cat((caXYZ,mp_list),axis=0).type(self.cast_type)
             mpGraph_rev.ndata['pe'] = torch.cat((pe_mp,pe_mp[mp_node_indx]))
-            mpGraph_rev.edata['con'] = torch.zeros((mpGraph_rev.num_edges(),1))
+            mpGraph_rev.edata['con'] = torch.zeros((mpGraph_rev.num_edges(),1),device=caXYZ.device)
             
             #make graph for self interaction of midpoints
             v1,v2,edge_data, ind = define_graph_edges(len(mp_list))
             mpSelfGraph = dgl.graph((v1,v2))
             mpSelfGraph.edata['con'] = edge_data.reshape((-1,1))
             mpSelfGraph.ndata['pe'] = self.pe[mp_node_indx] #not really needed
+            mpSelfGraph = mpSelfGraph.to(caXYZ.device)
             mpSelfGraph.ndata['pos'] = mp_list.type(self.cast_type)
             
             
@@ -325,6 +331,7 @@ class Make_KNN_MP_Graphs():
         batched_mpself_graph.edata['rel_pos'] = _get_relative_pos(batched_mpself_graph)
         batched_mpRevgraph.edata['rel_pos'] = _get_relative_pos(batched_mpRevgraph)
         # get node features
+        
         node_feats =         {'0': batched_graph.ndata['pe'][:, :self.NODE_FEATURE_DIM_0, None],
                               '1': batched_graph.ndata['bb_ori'][:,:self.NODE_FEATURE_DIM_1, :3]}
         node_feats_mp =      {'0': batched_mpgraph.ndata['pe'][:, :self.ndf0, None],
