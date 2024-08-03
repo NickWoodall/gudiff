@@ -423,8 +423,6 @@ class GraphUNet(torch.nn.Module):
         for k,v in up_mp_gcn_out.items():
             off_mp_add[k] = torch.add(up_mp_gcn_out[k],nf_mp_out[k])
 
-
-        #####triple check from here
         #midpoints node indices for unpool layer
         mp_node_indx = torch.arange(self.ca_nodes,self.mp_nodes, device=self.device)
         mp_idx = mp_node_indx[None,...].repeat_interleave(self.B,0)
