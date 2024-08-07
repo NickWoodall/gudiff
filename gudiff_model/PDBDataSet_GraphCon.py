@@ -9,6 +9,7 @@ from typing import Dict
 from torch import Tensor
 from dgl import DGLGraph
 from se3_transformer.runtime.utils import to_cuda
+import pandas as pd
 #from se3_diffuse import rigid_utils as ru
 
 #Globals from npose for making pdb files
@@ -389,7 +390,6 @@ class Make_KNN_MP_Graphs():
                        ndf1=6, ndf0=32,cuda=True):
         
         self.KNN = 30
-        self.pe = make_pe_encoding(n_nodes=n_nodes)
         self.mp_stride = mp_stride
         self.cast_type = cast_type
         self.channels_start = channels_start
@@ -405,9 +405,11 @@ class Make_KNN_MP_Graphs():
         mpRevGraphList = []
         mpSelfGraphList = []
         
+        pe = make_pe_encoding(n_nodes=bb_dict['CA'].shape[1])
+        
         for j, caXYZ in enumerate(bb_dict['CA']):
             graph = dgl.knn_graph(caXYZ, self.KNN)
-            graph.ndata['pe'] = self.pe.to(caXYZ.device)
+            graph.ndata['pe'] = pe.to(caXYZ.device)
             graph.ndata['pos'] = caXYZ
             graph.ndata['bb_ori'] = torch.cat((bb_dict['N_CA'][j],  bb_dict['C_CA'][j]),axis=1)
             
@@ -446,9 +448,9 @@ class Make_KNN_MP_Graphs():
             mp_node_indx = torch.arange(0, n_nodes, self.mp_stride).type(torch.int)
             #match output shape of first transformer
             pe_mp = torch.cat(
-                              (self.pe.to(caXYZ.device),
-                              torch.zeros( (self.pe.shape[0],
-                                            self.channels_start-self.pe.shape[1]),
+                              (pe.to(caXYZ.device),
+                              torch.zeros( (pe.shape[0],
+                                            self.channels_start-pe.shape[1]),
                                                 device=caXYZ.device))
                                                                      ,axis=1)
             mpGraph.ndata['pe'] = torch.cat((pe_mp,pe_mp[mp_node_indx]))
@@ -463,7 +465,7 @@ class Make_KNN_MP_Graphs():
             v1,v2,edge_data, ind = define_graph_edges(len(mp_list))
             mpSelfGraph = dgl.graph((v1,v2))
             mpSelfGraph.edata['con'] = edge_data.reshape((-1,1))
-            mpSelfGraph.ndata['pe'] = self.pe[mp_node_indx] #not really needed
+            mpSelfGraph.ndata['pe'] = pe[mp_node_indx] #not really needed
             mpSelfGraph = mpSelfGraph.to(caXYZ.device)
             mpSelfGraph.ndata['pos'] = mp_list.type(self.cast_type)
             
