@@ -10,6 +10,10 @@ from torch import Tensor
 from dgl import DGLGraph
 from se3_transformer.runtime.utils import to_cuda
 import pandas as pd
+import util.framediff_utils as du
+from openfold.np import residue_constants
+import tree
+import random
 #from se3_diffuse import rigid_utils as ru
 
 #Globals from npose for making pdb files
@@ -479,7 +483,8 @@ class Make_KNN_MP_Graphs():
     
     def prep_for_network(self, bb_dict, cuda=True):
     
-        batched_graph, batched_mpgraph, batched_mpself_graph, batched_mpRevgraph =  self.create_and_batch(bb_dict)
+        n_nodes = bb_dict['CA'].shape[1]
+        batched_graph, batched_mpgraph, batched_mpself_graph, batched_mpRevgraph =  self.create_and_batch(bb_dict, n_nodes)
         
         edge_feats        =    {'0':   batched_graph.edata['con'][:, :self.EDGE_FEATURE_DIM, None]}
         edge_feats_mp     = {'0': batched_mpgraph.edata['con'][:, :self.EDGE_FEATURE_DIM, None]} #def all zero now
